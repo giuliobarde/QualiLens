@@ -1,103 +1,150 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useRef } from 'react';
 
 export default function Home() {
-  const [pdfFile, setPdfFile] = useState<File | null>(null);
-  const [link, setLink] = useState('');
-  const [text, setText] = useState('');
+  const [query, setQuery] = useState('');
+  const [attachedFile, setAttachedFile] = useState<File | null>(null);
+  const [isLoading, setIsLoading] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
-  const handlePdfUpload = (event: React.ChangeEvent<HTMLInputElement>) => {
+  const handleFileUpload = (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
-    if (file && file.type === 'application/pdf') {
-      setPdfFile(file);
-    } else {
-      alert('Please select a valid PDF file');
+    if (file) {
+      setAttachedFile(file);
     }
   };
 
-  const handleSubmit = () => {
-    // Handle form submission here
-    console.log('PDF:', pdfFile);
-    console.log('Link:', link);
-    console.log('Text:', text);
+  const removeFile = () => {
+    setAttachedFile(null);
+    if (fileInputRef.current) {
+      fileInputRef.current.value = '';
+    }
+  };
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!query.trim() && !attachedFile) return;
+
+    setIsLoading(true);
+    
+    try {
+      // TODO: Implement API call to backend orchestrator
+      console.log('Query:', query);
+      console.log('File:', attachedFile);
+      
+      // Simulate API call
+      await new Promise(resolve => setTimeout(resolve, 2000));
+      
+    } catch (error) {
+      console.error('Error processing request:', error);
+    } finally {
+      setIsLoading(false);
+    }
   };
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-blue-50 to-indigo-100 p-8">
-      <div className="max-w-2xl mx-auto">
-        <div className="bg-white rounded-2xl shadow-xl p-8">
-          <h1 className="text-3xl font-bold text-gray-900 mb-2 text-center">
+    <div className="min-h-screen bg-gradient-to-br from-slate-50 to-blue-50 flex items-center justify-center p-4">
+      <div className="w-full max-w-2xl">
+        <div className="text-center mb-8">
+          <h1 className="text-4xl font-bold text-gray-900 mb-4">
             QualiLens
           </h1>
-          <p className="text-gray-600 text-center mb-8">
-            Upload a PDF, add a link, or paste text to get started
+          <p className="text-lg text-gray-600">
+            Ask questions about your research or upload documents for analysis
           </p>
+        </div>
 
-          <div className="space-y-6">
-            {/* PDF Upload Section */}
-            <div className="border-2 border-dashed border-gray-300 rounded-xl p-6 hover:border-indigo-400 transition-colors">
-              <div className="text-center">
-                <svg className="mx-auto h-12 w-12 text-gray-400" stroke="currentColor" fill="none" viewBox="0 0 48 48">
-                  <path d="M28 8H12a4 4 0 00-4 4v20m32-12v8m0 0v8a4 4 0 01-4 4H12a4 4 0 01-4-4v-4m32-4l-3.172-3.172a4 4 0 00-5.656 0L28 28M8 32l9.172-9.172a4 4 0 015.656 0L28 28m0 0l4 4m4-24h8m-4-4v8m-12 4h.02" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
-                </svg>
-                <div className="mt-4">
-                  <label htmlFor="pdf-upload" className="cursor-pointer">
-                    <span className="mt-2 block text-sm font-medium text-gray-900">
-                      {pdfFile ? pdfFile.name : 'Upload a PDF file'}
-                    </span>
-                    <span className="mt-1 block text-sm text-gray-500">
-                      Click to browse or drag and drop
-                    </span>
-                  </label>
+        <div className="bg-white rounded-2xl shadow-xl p-8">
+          <form onSubmit={handleSubmit} className="space-y-6">
+            {/* Search Input */}
+            <div className="relative">
+              <div className="flex items-center space-x-3">
+                <div className="flex-1 relative">
                   <input
-                    id="pdf-upload"
-                    type="file"
-                    accept=".pdf"
-                    onChange={handlePdfUpload}
-                    className="sr-only"
+                    type="text"
+                    value={query}
+                    onChange={(e) => setQuery(e.target.value)}
+                    placeholder="Ask a question about your research..."
+                    className="w-full px-4 py-4 pr-12 border border-gray-300 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-colors text-lg"
+                    disabled={isLoading}
                   />
+                  <div className="absolute right-3 top-1/2 transform -translate-y-1/2">
+                    <svg className="w-5 h-5 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+                    </svg>
+                  </div>
                 </div>
+                
+                {/* File Upload Button */}
+                <label className="flex items-center justify-center w-12 h-12 bg-gray-100 hover:bg-gray-200 rounded-xl cursor-pointer transition-colors">
+                  <input
+                    ref={fileInputRef}
+                    type="file"
+                    accept=".pdf,.doc,.docx,.txt"
+                    onChange={handleFileUpload}
+                    className="sr-only"
+                    disabled={isLoading}
+                  />
+                  <svg className="w-5 h-5 text-gray-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15.172 7l-6.586 6.586a2 2 0 102.828 2.828l6.414-6.586a4 4 0 00-5.656-5.656l-6.415 6.585a6 6 0 108.486 8.486L20.5 13" />
+                  </svg>
+                </label>
               </div>
             </div>
 
-            {/* Link Input Section */}
-            <div>
-              <label htmlFor="link-input" className="block text-sm font-medium text-gray-700 mb-2">
-                Add a Link
-              </label>
-              <input
-                id="link-input"
-                type="url"
-                value={link}
-                onChange={(e) => setLink(e.target.value)}
-                placeholder="https://example.com"
-                className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 transition-colors"
-              />
-            </div>
-
-            {/* Text Input Section */}
-            <div>
-              <label htmlFor="text-input" className="block text-sm font-medium text-gray-700 mb-2">
-                Write or Paste Text
-              </label>
-              <textarea
-                id="text-input"
-                value={text}
-                onChange={(e) => setText(e.target.value)}
-                placeholder="Enter your text here..."
-                rows={6}
-                className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 transition-colors resize-none"
-              />
-            </div>
+            {/* Attached File Display */}
+            {attachedFile && (
+              <div className="flex items-center justify-between bg-blue-50 border border-blue-200 rounded-xl p-4">
+                <div className="flex items-center space-x-3">
+                  <svg className="w-5 h-5 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                  </svg>
+                  <div>
+                    <p className="text-sm font-medium text-blue-900">{attachedFile.name}</p>
+                    <p className="text-xs text-blue-600">
+                      {(attachedFile.size / 1024 / 1024).toFixed(2)} MB
+                    </p>
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={removeFile}
+                  className="text-blue-600 hover:text-blue-800 transition-colors"
+                  disabled={isLoading}
+                >
+                  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                  </svg>
+                </button>
+              </div>
+            )}
 
             {/* Submit Button */}
             <button
-              onClick={handleSubmit}
-              className="w-full bg-indigo-600 text-white py-3 px-6 rounded-lg font-medium hover:bg-indigo-700 focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2 transition-colors"
+              type="submit"
+              disabled={(!query.trim() && !attachedFile) || isLoading}
+              className="w-full bg-blue-600 text-white py-4 px-6 rounded-xl font-medium hover:bg-blue-700 focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 transition-colors disabled:opacity-50 disabled:cursor-not-allowed text-lg"
             >
-              Process Content
+              {isLoading ? (
+                <div className="flex items-center justify-center space-x-2">
+                  <svg className="animate-spin w-5 h-5" fill="none" viewBox="0 0 24 24">
+                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                  </svg>
+                  <span>Processing...</span>
+                </div>
+              ) : (
+                'Analyze'
+              )}
             </button>
+          </form>
+
+          {/* Help Text */}
+          <div className="mt-6 text-center">
+            <p className="text-sm text-gray-500">
+              Upload PDFs, Word documents, or text files to analyze their content
+            </p>
           </div>
         </div>
       </div>
