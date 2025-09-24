@@ -272,13 +272,20 @@ def upload_file():
             
             # Execute PDF analysis directly
             try:
-                result = pdf_tool.run({
-                    'pdf_bytes': file_content,
-                    'options': {
-                        'return_sections': True,
-                        'preserve_bbox': False
-                    }
-                })
+                # Save file temporarily for processing
+                import tempfile
+                import os
+                
+                with tempfile.NamedTemporaryFile(delete=False, suffix='.pdf') as temp_file:
+                    temp_file.write(file_content)
+                    temp_file_path = temp_file.name
+                
+                try:
+                    result = pdf_tool.execute(file_path=temp_file_path)
+                finally:
+                    # Clean up temporary file
+                    if os.path.exists(temp_file_path):
+                        os.unlink(temp_file_path)
                 
                 # Format response
                 response_data = {
