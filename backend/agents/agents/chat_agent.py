@@ -1,7 +1,7 @@
 """
-Paper Analysis Agent for QualiLens.
+Chat Agent for QualiLens.
 
-This agent handles paper analysis, PDF parsing, and research-related queries.
+This agent handles general conversation and chat queries.
 """
 
 import logging
@@ -14,27 +14,26 @@ from ..question_classifier import ClassificationResult, QueryType
 logger = logging.getLogger(__name__)
 
 
-class PaperAnalysisAgent(BaseAgent):
+class ChatAgent(BaseAgent):
     """
-    Agent responsible for handling paper analysis and research-related queries.
+    Agent responsible for handling general chat and conversation queries.
     """
     
     def _get_name(self) -> str:
         """Return the name of this agent."""
-        return "paper_analysis_agent"
+        return "chat_agent"
     
     def _get_description(self) -> str:
         """Return the description of this agent."""
-        return "Handles paper analysis, PDF parsing, and research-related queries"
+        return "Handles general conversation, questions, and chat interactions"
     
     def _get_capabilities(self) -> List[str]:
         """Return the capabilities of this agent."""
         return [
-            "paper_analysis",
-            "pdf_parsing",
-            "link_analysis",
-            "text_section_analysis",
-            "research_queries"
+            "general_chat",
+            "conversation",
+            "question_answering",
+            "small_talk"
         ]
     
     def can_handle(self, query: str, classification: ClassificationResult) -> bool:
@@ -48,26 +47,23 @@ class PaperAnalysisAgent(BaseAgent):
         Returns:
             bool: True if this agent can handle the query
         """
-        # Handle paper analysis queries
-        if classification.query_type == QueryType.PAPER_ANALYSIS:
+        # Handle general chat queries
+        if classification.query_type == QueryType.GENERAL_CHAT:
             return True
         
-        # Handle queries that require paper analysis tools
-        paper_analysis_tools = [
-            "paper_analyzer_tool",
-            "parse_pdf_tool",
-            "link_analyzer_tool",
-            "text_section_analyzer_tool"
-        ]
+        # Handle queries that don't require specific tools
+        if classification.suggested_tool == "general_chat_tool":
+            return True
         
-        if classification.suggested_tool in paper_analysis_tools:
+        # Handle queries with no specific tool suggestion
+        if not classification.suggested_tool:
             return True
         
         return False
     
     def process_query(self, query: str, classification: ClassificationResult) -> AgentResponse:
         """
-        Process a user query using appropriate paper analysis tools.
+        Process a user query using the general chat tool.
         
         Args:
             query (str): The user query
@@ -77,23 +73,10 @@ class PaperAnalysisAgent(BaseAgent):
             AgentResponse: Response from the agent
         """
         start_time = datetime.now()
-        tools_used = []
         
         try:
-            # Determine which tool to use based on classification
-            tool_name = classification.suggested_tool
-            if not tool_name:
-                # Default to paper analyzer if no specific tool suggested
-                tool_name = "paper_analyzer_tool"
-            
-            # Merge query with extracted parameters
-            params = classification.extracted_parameters.copy()
-            if 'query' not in params:
-                params['query'] = query
-            
-            # Execute the appropriate tool
-            result = self.execute_tool(tool_name, **params)
-            tools_used.append(tool_name)
+            # Use the general chat tool
+            result = self.execute_tool("general_chat_tool", query=query)
             
             execution_time = int((datetime.now() - start_time).total_seconds() * 1000)
             
@@ -101,22 +84,22 @@ class PaperAnalysisAgent(BaseAgent):
                 success=True,
                 result=result,
                 agent_name=self.name,
-                tools_used=tools_used,
+                tools_used=["general_chat_tool"],
                 error_message=None,
                 execution_time_ms=execution_time,
                 timestamp=start_time
             )
             
         except Exception as e:
-            logger.error(f"Paper analysis agent error: {str(e)}")
+            logger.error(f"Chat agent error: {str(e)}")
             execution_time = int((datetime.now() - start_time).total_seconds() * 1000)
             
             return AgentResponse(
                 success=False,
                 result=None,
                 agent_name=self.name,
-                tools_used=tools_used,
-                error_message=f"Paper analysis agent failed: {str(e)}",
+                tools_used=[],
+                error_message=f"Chat agent failed: {str(e)}",
                 execution_time_ms=execution_time,
                 timestamp=start_time
             )

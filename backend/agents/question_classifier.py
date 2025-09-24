@@ -18,6 +18,7 @@ class QueryType(Enum):
     PDF_ANALYSIS = "pdf_analysis"
     TEXT_SECTION = "text_section"
     LINK_ANALYSIS = "link_analysis"
+    PAPER_ANALYSIS = "paper_analysis"
     GENERAL_CHAT = "general_chat"
 
 @dataclass

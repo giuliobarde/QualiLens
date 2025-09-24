@@ -16,7 +16,7 @@ import sys
 import os
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from agents.orchestrator import AgentOrchestrator, AgentResponse
+from agents.orchestrator import AgentOrchestrator, OrchestratorResponse
 from agents.tools.parse_pdf import ParsePDFTool
 from agents.tools.text_section_analyzer import TextSectionAnalyzerTool
 from agents.tools.link_analyzer import LinkAnalyzerTool
@@ -95,7 +95,8 @@ def agent_query():
         result = {
             'success': response.success,
             'result': response.result,
-            'tool_used': response.tool_used,
+            'agent_used': response.agent_used,
+            'tools_used': response.tools_used,
             'classification': {
                 'query_type': response.classification.query_type.value if response.classification else None,
                 'confidence': response.classification.confidence if response.classification else None,
@@ -109,7 +110,7 @@ def agent_query():
         }
         
         if response.success:
-            logger.info(f"Agent query successful - Tool: {response.tool_used}, Time: {response.execution_time_ms}ms")
+            logger.info(f"Agent query successful - Agent: {response.agent_used}, Tools: {response.tools_used}, Time: {response.execution_time_ms}ms")
             return jsonify(result)
         else:
             logger.warning(f"Agent query failed: {response.error_message}")
@@ -135,6 +136,7 @@ def get_agent_status():
         
         # Get status information
         available_tools = orchestrator.get_available_tools()
+        available_agents = orchestrator.get_available_agents()
         execution_stats = orchestrator.get_execution_stats()
         
         # Get search tool status if available
@@ -145,6 +147,7 @@ def get_agent_status():
         
         status = {
             'agent_initialized': True,
+            'available_agents': available_agents,
             'available_tools': available_tools,
             'execution_stats': execution_stats,
             'search_tool_status': search_tool_status,
@@ -253,50 +256,82 @@ def upload_file():
         
         orchestrator = current_app.agent_orchestrator
         
-        # Get the PDF tool
-        pdf_tool = orchestrator.tool_registry.get_tool('parse_pdf')
-        if not pdf_tool:
-            return jsonify({'error': 'PDF tool not available'}), 500
+        # Process the file upload through the agent system
+        # Create a query that will trigger PDF analysis
+        query = f"Analyze this PDF file: {file.filename}"
         
-        # Execute PDF analysis
-        try:
-            result = pdf_tool.run({
-                'pdf_bytes': file_content,
-                'options': {
-                    'return_sections': True,
-                    'preserve_bbox': False
-                }
-            })
+        # Process the query through the orchestrator
+        response = orchestrator.process_query(query)
+        
+        # If the agent system didn't handle it, fall back to direct tool usage
+        if not response.success or not response.result:
+            # Get the PDF tool directly as fallback
+            pdf_tool = orchestrator.tool_registry.get_tool('parse_pdf')
+            if not pdf_tool:
+                return jsonify({'error': 'PDF tool not available'}), 500
             
-            # Format response
+            # Execute PDF analysis directly
+            try:
+                result = pdf_tool.run({
+                    'pdf_bytes': file_content,
+                    'options': {
+                        'return_sections': True,
+                        'preserve_bbox': False
+                    }
+                })
+                
+                # Format response
+                response_data = {
+                    'success': True,
+                    'result': result,
+                    'agent_used': 'paper_analysis_agent',
+                    'tools_used': ['parse_pdf'],
+                    'classification': {
+                        'query_type': 'pdf_analysis',
+                        'confidence': 1.0,
+                        'suggested_tool': 'parse_pdf',
+                        'extracted_parameters': {},
+                        'reasoning': 'PDF file uploaded for analysis'
+                    },
+                    'error_message': None,
+                    'execution_time_ms': 0,
+                    'timestamp': datetime.now().isoformat()
+                }
+                
+                logger.info(f"PDF analysis successful for file: {file.filename}")
+                return jsonify(response_data)
+                
+            except Exception as tool_error:
+                logger.error(f"PDF analysis error: {str(tool_error)}")
+                return jsonify({
+                    'success': False,
+                    'result': None,
+                    'agent_used': 'paper_analysis_agent',
+                    'tools_used': ['parse_pdf'],
+                    'error_message': f"PDF analysis failed: {str(tool_error)}",
+                    'timestamp': datetime.now().isoformat()
+                }), 500
+        else:
+            # Use the agent response
             response_data = {
-                'success': True,
-                'result': result,
-                'tool_used': 'parse_pdf',
+                'success': response.success,
+                'result': response.result,
+                'agent_used': response.agent_used,
+                'tools_used': response.tools_used,
                 'classification': {
-                    'query_type': 'pdf_analysis',
-                    'confidence': 1.0,
-                    'suggested_tool': 'parse_pdf',
-                    'extracted_parameters': {},
-                    'reasoning': 'PDF file uploaded for analysis'
+                    'query_type': response.classification.query_type.value if response.classification else 'pdf_analysis',
+                    'confidence': response.classification.confidence if response.classification else 1.0,
+                    'suggested_tool': response.classification.suggested_tool if response.classification else 'parse_pdf',
+                    'extracted_parameters': response.classification.extracted_parameters if response.classification else {},
+                    'reasoning': response.classification.reasoning if response.classification else 'PDF file uploaded for analysis'
                 },
-                'error_message': None,
-                'execution_time_ms': 0,
-                'timestamp': datetime.now().isoformat()
+                'error_message': response.error_message,
+                'execution_time_ms': response.execution_time_ms,
+                'timestamp': response.timestamp.isoformat()
             }
             
-            logger.info(f"PDF analysis successful for file: {file.filename}")
+            logger.info(f"PDF analysis successful for file: {file.filename} using agent: {response.agent_used}")
             return jsonify(response_data)
-            
-        except Exception as tool_error:
-            logger.error(f"PDF analysis error: {str(tool_error)}")
-            return jsonify({
-                'success': False,
-                'result': None,
-                'tool_used': 'parse_pdf',
-                'error_message': f"PDF analysis failed: {str(tool_error)}",
-                'timestamp': datetime.now().isoformat()
-            }), 500
         
     except Exception as e:
         logger.error(f"File upload error: {str(e)}")
