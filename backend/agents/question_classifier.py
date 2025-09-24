@@ -15,7 +15,9 @@ logger = logging.getLogger(__name__)
 
 class QueryType(Enum):
     """Type of query."""
-    PAPER_ANALYSIS = "paper_analysis"
+    PDF_ANALYSIS = "pdf_analysis"
+    TEXT_SECTION = "text_section"
+    LINK_ANALYSIS = "link_analysis"
     GENERAL_CHAT = "general_chat"
 
 @dataclass
@@ -23,7 +25,7 @@ class ClassificationResult:
     """Result of the question classifier."""
     query_type: QueryType
     confidence: float
-    suggested_tools: List[str]
+    suggested_tool: str
     extracted_parameters: Dict[str, Any]
     reasoning: str
 
@@ -62,7 +64,7 @@ class QuestionClassifier:
             max_tokens=500,
         )
         
-        result = self._parse_classification_response(response, query)
+        result = _parse_classification_response(response, query)
 
         return result
 
@@ -82,6 +84,12 @@ def _create_classification_prompt(query: str, available_tools: List[str]) -> str
 You are a helpful assistant that classifies user queries to determine the appropriate tool.
 The user query is: {query}
 The available tools are: {available_tools}
+
+Query types:
+- pdf_analysis: For PDF file analysis
+- text_section: For analyzing text sections of papers
+- link_analysis: For analyzing links to academic papers
+- general_chat: For general conversational queries
 
 You should return the appropriate tool and parameters for the user query.
 
@@ -105,7 +113,7 @@ Respond with a JSON object containing:
     """
     return prompt
 
-def _parse_classification_response(self, response: str, original_query: str) -> ClassificationResult:
+def _parse_classification_response(response: str, original_query: str) -> ClassificationResult:
         """
         Parse the LLM response into a ClassificationResult.
         
@@ -128,11 +136,11 @@ def _parse_classification_response(self, response: str, original_query: str) -> 
             data = json.loads(json_str)
             
             # Parse query type
-            query_type_str = data.get('query_type', 'unknown')
+            query_type_str = data.get('query_type', 'general_chat')
             try:
                 query_type = QueryType(query_type_str)
             except ValueError:
-                query_type = QueryType.UNKNOWN
+                query_type = QueryType.GENERAL_CHAT
             
             # Parse confidence
             confidence = float(data.get('confidence', 0.5))
@@ -163,4 +171,15 @@ def _parse_classification_response(self, response: str, original_query: str) -> 
             
         except Exception as e:
             logger.error(f"Error parsing classification response: {str(e)}")
-            return self._create_fallback_result(original_query)
+            return _create_fallback_result(original_query)
+
+
+def _create_fallback_result(original_query: str) -> ClassificationResult:
+    """Create a fallback classification result."""
+    return ClassificationResult(
+        query_type=QueryType.GENERAL_CHAT,
+        confidence=0.5,
+        suggested_tool="general_chat_tool",
+        extracted_parameters={"query": original_query},
+        reasoning="Fallback classification due to parsing error"
+    )

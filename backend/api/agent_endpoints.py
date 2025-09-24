@@ -9,6 +9,7 @@ import logging
 from datetime import datetime
 from flask import request, jsonify, current_app
 from typing import Dict, Any, Optional
+import base64
 
 # Add the project root to the Python path for imports
 import sys
@@ -17,6 +18,9 @@ sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from agents.orchestrator import AgentOrchestrator, AgentResponse
 from agents.tools.parse_pdf import ParsePDFTool
+from agents.tools.text_section_analyzer import TextSectionAnalyzerTool
+from agents.tools.link_analyzer import LinkAnalyzerTool
+from agents.tools.general_chat import GeneralChatTool
 
 logger = logging.getLogger(__name__)
 
@@ -31,9 +35,18 @@ def create_agent_orchestrator() -> AgentOrchestrator:
     try:
         orchestrator = AgentOrchestrator()
         
-        # Register the search tool
+        # Register all tools
         parse_pdf_tool = ParsePDFTool()
         orchestrator.register_tool(parse_pdf_tool)
+        
+        text_section_tool = TextSectionAnalyzerTool()
+        orchestrator.register_tool(text_section_tool)
+        
+        link_analyzer_tool = LinkAnalyzerTool()
+        orchestrator.register_tool(link_analyzer_tool)
+        
+        general_chat_tool = GeneralChatTool()
+        orchestrator.register_tool(general_chat_tool)
         
         logger.info("Agent orchestrator created and configured successfully")
         return orchestrator
@@ -208,4 +221,83 @@ def clear_agent_cache():
         
     except Exception as e:
         logger.error(f"Clear agent cache error: {str(e)}")
+        return jsonify({'error': str(e)}), 500
+
+
+def upload_file():
+    """
+    Handle file uploads for analysis.
+    
+    POST /api/agent/upload
+    Expected multipart form data with file
+    """
+    try:
+        # Check if file is present
+        if 'file' not in request.files:
+            return jsonify({'error': 'No file provided'}), 400
+        
+        file = request.files['file']
+        if file.filename == '':
+            return jsonify({'error': 'No file selected'}), 400
+        
+        # Check file type
+        if not file.filename.lower().endswith('.pdf'):
+            return jsonify({'error': 'Only PDF files are supported'}), 400
+        
+        # Read file content
+        file_content = file.read()
+        
+        # Get or create agent orchestrator
+        if not hasattr(current_app, 'agent_orchestrator'):
+            current_app.agent_orchestrator = create_agent_orchestrator()
+        
+        orchestrator = current_app.agent_orchestrator
+        
+        # Get the PDF tool
+        pdf_tool = orchestrator.tool_registry.get_tool('parse_pdf')
+        if not pdf_tool:
+            return jsonify({'error': 'PDF tool not available'}), 500
+        
+        # Execute PDF analysis
+        try:
+            result = pdf_tool.run({
+                'pdf_bytes': file_content,
+                'options': {
+                    'return_sections': True,
+                    'preserve_bbox': False
+                }
+            })
+            
+            # Format response
+            response_data = {
+                'success': True,
+                'result': result,
+                'tool_used': 'parse_pdf',
+                'classification': {
+                    'query_type': 'pdf_analysis',
+                    'confidence': 1.0,
+                    'suggested_tool': 'parse_pdf',
+                    'extracted_parameters': {},
+                    'reasoning': 'PDF file uploaded for analysis'
+                },
+                'error_message': None,
+                'execution_time_ms': 0,
+                'timestamp': datetime.now().isoformat()
+            }
+            
+            logger.info(f"PDF analysis successful for file: {file.filename}")
+            return jsonify(response_data)
+            
+        except Exception as tool_error:
+            logger.error(f"PDF analysis error: {str(tool_error)}")
+            return jsonify({
+                'success': False,
+                'result': None,
+                'tool_used': 'parse_pdf',
+                'error_message': f"PDF analysis failed: {str(tool_error)}",
+                'timestamp': datetime.now().isoformat()
+            }), 500
+        
+    except Exception as e:
+        logger.error(f"File upload error: {str(e)}")
         return jsonify({'error': str(e)}), 500

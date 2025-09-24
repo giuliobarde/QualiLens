@@ -14,19 +14,44 @@ class ParsePDFTool(BaseTool):
     """
     def __init__(self, *, preserve_bbox: bool = False):
         super().__init__()
-        self.name = "parse_pdf"
-        self.description = "Parse a PDF into paragraphs with page numbers and coarse sections."
         self.preserve_bbox = preserve_bbox
-        self.parameters = {
-            "required": ["pdf_file"],
-            "optional": [],
-            "properties": {
-                "pdf_file": {
-                    "type": "string",
-                    "description": "The path to the PDF file to parse."
+    
+    def _get_metadata(self):
+        """Return the metadata for this tool."""
+        from .base_tool import ToolMetadata
+        return ToolMetadata(
+            name="parse_pdf",
+            description="Parse a PDF into paragraphs with page numbers and coarse sections.",
+            parameters={
+                "required": ["pdf_file"],
+                "optional": [],
+                "properties": {
+                    "pdf_file": {
+                        "type": "string",
+                        "description": "The path to the PDF file to parse."
+                    }
                 }
-            }
-        }
+            },
+            examples=[
+                "Parse this PDF file",
+                "Analyze the content of this document",
+                "Extract text from this PDF"
+            ],
+            category="analysis"
+        )
+    
+    def execute(self, **kwargs) -> Dict[str, Any]:
+        """
+        Execute the PDF parsing tool.
+        
+        Args:
+            **kwargs: Tool parameters
+            
+        Returns:
+            Dict[str, Any]: Tool execution result
+        """
+        # Use the existing run method
+        return self.run(kwargs)
     
     def _hash(self, b: bytes) -> str:
         return hashlib.sha256(b).hexdigest()[:16]

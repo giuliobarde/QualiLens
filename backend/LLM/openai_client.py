@@ -8,7 +8,7 @@ embeddings, completions, and other language model tasks using LangChain.
 import logging
 from typing import List, Optional, Dict, Any
 import os
-from langchain_openai import ChatOpenAI
+from langchain_openai import ChatOpenAI, OpenAIEmbeddings
 from langchain.schema import HumanMessage
 
 logger = logging.getLogger(__name__)

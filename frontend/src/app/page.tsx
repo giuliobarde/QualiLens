@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useRef } from 'react';
+import { agentService } from '@/utils/agent-service';
 
 export default function Home() {
   const [query, setQuery] = useState('');
@@ -29,12 +30,21 @@ export default function Home() {
     setIsLoading(true);
     
     try {
-      // TODO: Implement API call to backend orchestrator
-      console.log('Query:', query);
-      console.log('File:', attachedFile);
+      let response;
       
-      // Simulate API call
-      await new Promise(resolve => setTimeout(resolve, 2000));
+      if (attachedFile) {
+        // Handle file upload
+        console.log('Uploading file:', attachedFile.name);
+        response = await agentService.uploadFile(attachedFile);
+      } else {
+        // Handle text query
+        console.log('Processing query:', query);
+        response = await agentService.queryAgent({ query });
+      }
+      
+      console.log('Response:', response);
+      
+      // TODO: Display response in UI
       
     } catch (error) {
       console.error('Error processing request:', error);
