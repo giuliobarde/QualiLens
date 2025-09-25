@@ -87,10 +87,13 @@ The user query is: {query}
 The available tools are: {available_tools}
 
 Query types:
-- pdf_analysis: For PDF file analysis
-- text_section: For analyzing text sections of papers
+- pdf_analysis: For basic PDF file parsing and text extraction only
+- text_section: For analyzing specific text sections of papers
 - link_analysis: For analyzing links to academic papers
+- paper_analysis: For comprehensive research paper analysis including summaries, bias detection, methodology analysis, statistics, reproducibility, research gaps, citations, and quality assessment. Use this for ANY query that mentions "analysis", "comprehensive", "detailed", "quality", "bias", "methodology", "statistics", "reproducibility", "gaps", "citations", or "quality score"
 - general_chat: For general conversational queries
+
+IMPORTANT: If the query mentions "Analysis level: comprehensive" or any comprehensive analysis keywords, ALWAYS use paper_analysis, not pdf_analysis.
 
 You should return the appropriate tool and parameters for the user query.
 

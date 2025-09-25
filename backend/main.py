@@ -28,6 +28,10 @@ def create_app():
     """Create and configure the Flask application."""
     app = Flask(__name__)
     
+    # Configure file upload limits
+    app.config['MAX_CONTENT_LENGTH'] = 50 * 1024 * 1024  # 50MB limit
+    app.config['UPLOAD_FOLDER'] = '/tmp/qualilens_uploads'
+    
     # Enable CORS for frontend communication
     CORS(app, origins=['http://localhost:3000', 'http://localhost:3001'], supports_credentials=True)
     
