@@ -235,73 +235,113 @@ export default function EnhancedResearchDataDisplay({ data, className = '' }: En
     </div>
   );
 
-  const renderMethodology = () => (
-    <div className="space-y-6">
-      {/* Study Design */}
-      {data.study_design && (
-        <div className="bg-white p-6 rounded-lg border border-gray-200">
-          <h3 className="text-xl font-semibold text-gray-800 mb-3">Study Design</h3>
-          <p className="text-gray-700">{data.study_design}</p>
-        </div>
-      )}
+  const renderMethodology = () => {
+    // Helper function to safely render any value
+    const safeRender = (value: any): string => {
+      if (value === null || value === undefined) return 'N/A';
+      if (typeof value === 'string') return value;
+      if (typeof value === 'number' || typeof value === 'boolean') return String(value);
+      if (Array.isArray(value)) return value.map(item => safeRender(item)).join(', ');
+      if (typeof value === 'object') return JSON.stringify(value, null, 2);
+      return String(value);
+    };
 
-      {/* Sample Characteristics */}
-      {data.sample_characteristics && (
-        <div className="bg-white p-6 rounded-lg border border-gray-200">
-          <h3 className="text-xl font-semibold text-gray-800 mb-3">Sample Characteristics</h3>
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            {Object.entries(data.sample_characteristics).map(([key, value]) => (
-              <div key={key} className="bg-gray-50 p-3 rounded">
-                <span className="font-medium text-gray-700 capitalize">{key.replace('_', ' ')}:</span>
-                <p className="text-sm text-gray-600 mt-1">{String(value)}</p>
-              </div>
-            ))}
-          </div>
-        </div>
-      )}
+    // Helper function to render list items safely
+    const renderListItems = (items: any[], icon: string, color: string) => {
+      if (!items || !Array.isArray(items) || items.length === 0) return null;
+      
+      return items.map((item, index) => (
+        <li key={index} className="flex items-start space-x-2">
+          <span className={`${color} mt-1`}>{icon}</span>
+          <span className="text-gray-700">{safeRender(item)}</span>
+        </li>
+      ));
+    };
 
-      {/* Methodological Strengths and Weaknesses */}
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-        {data.methodological_strengths && data.methodological_strengths.length > 0 && (
-          <div className="bg-green-50 p-6 rounded-lg border border-green-200">
-            <h3 className="text-xl font-semibold text-gray-800 mb-3">Methodological Strengths</h3>
-            <ul className="space-y-2">
-              {data.methodological_strengths.map((strength, index) => (
-                <li key={index} className="flex items-start space-x-2">
-                  <span className="text-green-500 mt-1">✓</span>
-                  <span className="text-gray-700">{strength}</span>
-                </li>
-              ))}
-            </ul>
+    // Helper function to render object entries safely
+    const renderObjectEntries = (obj: any) => {
+      if (!obj || typeof obj !== 'object') return null;
+      
+      return Object.entries(obj).map(([key, value]) => (
+        <div key={key} className="bg-gray-50 p-3 rounded">
+          <span className="font-medium text-gray-700 capitalize">
+            {key.replace(/_/g, ' ')}:
+          </span>
+          <p className="text-sm text-gray-600 mt-1">{safeRender(value)}</p>
+        </div>
+      ));
+    };
+
+    return (
+      <div className="space-y-6">
+        {/* Study Design */}
+        {data.study_design && (
+          <div className="bg-white p-6 rounded-lg border border-gray-200">
+            <h3 className="text-xl font-semibold text-gray-800 mb-3">Study Design</h3>
+            <p className="text-gray-700">{safeRender(data.study_design)}</p>
           </div>
         )}
 
-        {data.methodological_weaknesses && data.methodological_weaknesses.length > 0 && (
-          <div className="bg-red-50 p-6 rounded-lg border border-red-200">
-            <h3 className="text-xl font-semibold text-gray-800 mb-3">Methodological Weaknesses</h3>
-            <ul className="space-y-2">
-              {data.methodological_weaknesses.map((weakness, index) => (
-                <li key={index} className="flex items-start space-x-2">
-                  <span className="text-red-500 mt-1">⚠</span>
-                  <span className="text-gray-700">{weakness}</span>
-                </li>
-              ))}
-            </ul>
+        {/* Sample Characteristics */}
+        {data.sample_characteristics && (
+          <div className="bg-white p-6 rounded-lg border border-gray-200">
+            <h3 className="text-xl font-semibold text-gray-800 mb-3">Sample Characteristics</h3>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              {renderObjectEntries(data.sample_characteristics)}
+            </div>
+          </div>
+        )}
+
+        {/* Methodological Strengths and Weaknesses */}
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+          {/* Strengths */}
+          {data.methodological_strengths && data.methodological_strengths.length > 0 && (
+            <div className="bg-green-50 p-6 rounded-lg border border-green-200">
+              <h3 className="text-xl font-semibold text-gray-800 mb-3">Methodological Strengths</h3>
+              <ul className="space-y-2">
+                {renderListItems(data.methodological_strengths, '✓', 'text-green-500')}
+              </ul>
+            </div>
+          )}
+
+          {/* Weaknesses */}
+          {data.methodological_weaknesses && data.methodological_weaknesses.length > 0 && (
+            <div className="bg-red-50 p-6 rounded-lg border border-red-200">
+              <h3 className="text-xl font-semibold text-gray-800 mb-3">Methodological Weaknesses</h3>
+              <ul className="space-y-2">
+                {renderListItems(data.methodological_weaknesses, '⚠', 'text-red-500')}
+              </ul>
+            </div>
+          )}
+        </div>
+
+        {/* Quality Rating */}
+        {data.methodology_quality_rating && (
+          <div className="bg-white p-6 rounded-lg border border-gray-200">
+            <h3 className="text-xl font-semibold text-gray-800 mb-3">Methodology Quality Rating</h3>
+            <div className="flex items-center space-x-4">
+              <span className={`px-4 py-2 text-lg rounded ${getQualityColor(data.methodology_quality_rating)}`}>
+                {safeRender(data.methodology_quality_rating)}
+              </span>
+              <p className="text-sm text-gray-600">
+                Based on comprehensive analysis of study design, sample characteristics, and methodological rigor
+              </p>
+            </div>
+          </div>
+        )}
+
+        {/* Additional Methodology Information */}
+        {data.study_design || data.sample_characteristics || data.methodological_strengths || data.methodological_weaknesses ? null : (
+          <div className="bg-gray-50 p-6 rounded-lg border border-gray-200">
+            <h3 className="text-xl font-semibold text-gray-800 mb-3">Methodology Analysis</h3>
+            <p className="text-gray-600">
+              No detailed methodology information available for this analysis.
+            </p>
           </div>
         )}
       </div>
-
-      {/* Quality Rating */}
-      {data.methodology_quality_rating && (
-        <div className="bg-white p-6 rounded-lg border border-gray-200">
-          <h3 className="text-xl font-semibold text-gray-800 mb-3">Methodology Quality Rating</h3>
-          <span className={`px-4 py-2 text-lg rounded ${getQualityColor(data.methodology_quality_rating)}`}>
-            {data.methodology_quality_rating}
-          </span>
-        </div>
-      )}
-    </div>
-  );
+    );
+  };
 
   const renderBiasAnalysis = () => (
     <div className="space-y-6">
@@ -385,9 +425,20 @@ export default function EnhancedResearchDataDisplay({ data, className = '' }: En
                 ) : (
                   <div>
                     <h4 className="font-medium text-gray-800">{test.test_name || 'Test'}</h4>
-                    <p className="text-sm text-gray-600 mt-1">{test.purpose || test.description}</p>
+                    <p className="text-sm text-gray-600 mt-1">
+                      {typeof test.purpose === 'string' ? test.purpose : 
+                       typeof test.description === 'string' ? test.description : 
+                       'No description available'}
+                    </p>
                     {test.appropriateness && (
-                      <p className="text-sm text-gray-600 mt-1"><strong>Appropriateness:</strong> {test.appropriateness}</p>
+                      <p className="text-sm text-gray-600 mt-1">
+                        <strong>Appropriateness:</strong> {
+                          typeof test.appropriateness === 'string' ? test.appropriateness : 
+                          test.appropriateness.overall || 
+                          test.appropriateness.appropriateness || 
+                          'Appropriateness information available'
+                        }
+                      </p>
                     )}
                   </div>
                 )}
@@ -401,7 +452,62 @@ export default function EnhancedResearchDataDisplay({ data, className = '' }: En
       {data.test_appropriateness && (
         <div className="bg-white p-6 rounded-lg border border-gray-200">
           <h3 className="text-xl font-semibold text-gray-800 mb-3">Test Appropriateness</h3>
-          <p className="text-gray-700">{data.test_appropriateness.overall || data.test_appropriateness}</p>
+          {typeof data.test_appropriateness === 'string' ? (
+            <p className="text-gray-700">{data.test_appropriateness}</p>
+          ) : (
+            <div className="space-y-4">
+              {data.test_appropriateness.overall && (
+                <div>
+                  <h4 className="font-medium text-gray-700 mb-2">Overall Assessment</h4>
+                  <p className="text-gray-600">
+                    {typeof data.test_appropriateness.overall === 'string' 
+                      ? data.test_appropriateness.overall 
+                      : JSON.stringify(data.test_appropriateness.overall)}
+                  </p>
+                </div>
+              )}
+              {data.test_appropriateness.appropriateness && (
+                <div>
+                  <h4 className="font-medium text-gray-700 mb-2">Appropriateness</h4>
+                  <p className="text-gray-600">
+                    {typeof data.test_appropriateness.appropriateness === 'string' 
+                      ? data.test_appropriateness.appropriateness 
+                      : JSON.stringify(data.test_appropriateness.appropriateness)}
+                  </p>
+                </div>
+              )}
+              {data.test_appropriateness.rationale && (
+                <div>
+                  <h4 className="font-medium text-gray-700 mb-2">Rationale</h4>
+                  <p className="text-gray-600">
+                    {typeof data.test_appropriateness.rationale === 'string' 
+                      ? data.test_appropriateness.rationale 
+                      : JSON.stringify(data.test_appropriateness.rationale)}
+                  </p>
+                </div>
+              )}
+              {data.test_appropriateness.alternatives && (
+                <div>
+                  <h4 className="font-medium text-gray-700 mb-2">Alternatives</h4>
+                  <p className="text-gray-600">
+                    {typeof data.test_appropriateness.alternatives === 'string' 
+                      ? data.test_appropriateness.alternatives 
+                      : JSON.stringify(data.test_appropriateness.alternatives)}
+                  </p>
+                </div>
+              )}
+              {data.test_appropriateness.type && (
+                <div>
+                  <h4 className="font-medium text-gray-700 mb-2">Type</h4>
+                  <p className="text-gray-600">
+                    {typeof data.test_appropriateness.type === 'string' 
+                      ? data.test_appropriateness.type 
+                      : JSON.stringify(data.test_appropriateness.type)}
+                  </p>
+                </div>
+              )}
+            </div>
+          )}
         </div>
       )}
 
@@ -590,7 +696,11 @@ export default function EnhancedResearchDataDisplay({ data, className = '' }: En
                 ) : (
                   <div>
                     <h4 className="font-medium text-gray-800">{direction.direction || 'Future Direction'}</h4>
-                    <p className="text-sm text-gray-600 mt-1">{direction.rationale}</p>
+                    <p className="text-sm text-gray-600 mt-1">
+                      {typeof direction.rationale === 'string' 
+                        ? direction.rationale 
+                        : JSON.stringify(direction.rationale)}
+                    </p>
                     {direction.feasibility && <p className="text-sm text-gray-600 mt-1"><strong>Feasibility:</strong> {direction.feasibility}</p>}
                     {direction.priority && (
                       <span className={`inline-block px-2 py-1 text-xs rounded mt-2 ${
