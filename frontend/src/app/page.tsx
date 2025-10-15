@@ -2,8 +2,8 @@
 
 import { useState, useRef, useEffect } from 'react';
 import { agentService } from '@/utils/agent-service';
-import ResearchDataDisplay from '@/components/ResearchDataDisplay';
-import EnhancedResearchDataDisplay from '@/components/EnhancedResearchDataDisplay';
+import QualityScoreDisplay from '@/components/QualityScoreDisplay';
+import ScrollableAnalysisSections from '@/components/ScrollableAnalysisSections';
 import EnhancedProgressBar from '@/components/EnhancedProgressBar';
 
 export default function Home() {
@@ -12,7 +12,6 @@ export default function Home() {
   const [isLoading, setIsLoading] = useState(false);
   const [analysisResult, setAnalysisResult] = useState<any>(null);
   const [pdfContent, setPdfContent] = useState<string | null>(null);
-  const [viewMode, setViewMode] = useState<'side-by-side' | 'stacked'>('side-by-side');
   const [processingType, setProcessingType] = useState<'upload' | 'analysis' | 'detailed_analysis' | 'parallel_processing'>('analysis');
   const [analysisLevel, setAnalysisLevel] = useState<'basic' | 'standard' | 'comprehensive'>('standard');
   const [estimatedTime, setEstimatedTime] = useState<number | undefined>(undefined);
@@ -101,9 +100,9 @@ export default function Home() {
       
       console.log('🔍 FULL RESPONSE DEBUG:');
       console.log('Response success:', response.success);
-      console.log('Response agent_used:', response.agent_used);
-      console.log('Response tools_used:', response.tools_used);
-      console.log('Response classification:', response.classification);
+      console.log('Response agent_used:', (response as any).agent_used);
+      console.log('Response tools_used:', (response as any).tools_used);
+      console.log('Response classification:', (response as any).classification);
       console.log('Response result keys:', response.result ? Object.keys(response.result) : 'No result');
       console.log('Response result:', response.result);
       
@@ -150,33 +149,6 @@ export default function Home() {
               <h1 className="text-2xl font-bold text-gray-900">QualiLens</h1>
               <p className="text-sm text-gray-600">Research document analysis and insights</p>
             </div>
-            
-            {/* View Mode Toggle */}
-            {attachedFile && analysisResult && (
-              <div className="flex items-center space-x-2">
-                <span className="text-sm text-gray-600">View:</span>
-                <button
-                  onClick={() => setViewMode('side-by-side')}
-                  className={`px-3 py-1 text-sm rounded-md transition-colors ${
-                    viewMode === 'side-by-side' 
-                      ? 'bg-blue-100 text-blue-700' 
-                      : 'text-gray-600 hover:bg-gray-100'
-                  }`}
-                >
-                  Side by Side
-                </button>
-                <button
-                  onClick={() => setViewMode('stacked')}
-                  className={`px-3 py-1 text-sm rounded-md transition-colors ${
-                    viewMode === 'stacked' 
-                      ? 'bg-blue-100 text-blue-700' 
-                      : 'text-gray-600 hover:bg-gray-100'
-                  }`}
-                >
-                  Stacked
-                </button>
-              </div>
-            )}
           </div>
         </div>
       </div>
@@ -360,11 +332,11 @@ export default function Home() {
             </div>
           </div>
         ) : (
-          /* Results Display */
-          <div className={`${viewMode === 'side-by-side' ? 'grid grid-cols-1 lg:grid-cols-2 gap-6' : 'space-y-6'}`}>
-            {/* PDF Viewer */}
-            <div className={`${viewMode === 'side-by-side' ? 'lg:sticky lg:top-4' : ''}`}>
-              <div className="bg-white rounded-lg shadow-lg overflow-hidden">
+          /* Results Display - New Layout */
+          <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 h-[calc(100vh-200px)]">
+            {/* Paper Display - 2/3 of screen */}
+            <div className="lg:col-span-2">
+              <div className="bg-white rounded-lg shadow-lg overflow-hidden h-full">
                 <div className="bg-gray-50 px-4 py-3 border-b">
                   <div className="flex items-center justify-between">
                     <h3 className="text-lg font-semibold text-gray-800">Document</h3>
@@ -378,7 +350,7 @@ export default function Home() {
                     </button>
                   </div>
                 </div>
-                <div className="h-[600px] lg:h-[calc(100vh-200px)]">
+                <div className="h-[calc(100%-60px)]">
                   {pdfContent && (
                     <div className="w-full h-full">
                       {attachedFile && attachedFile.size > 3 * 1024 * 1024 ? (
@@ -413,34 +385,17 @@ export default function Home() {
               </div>
             </div>
 
-            {/* Analysis Results */}
-            <div className="space-y-4">
-              {/* Enhanced Analysis Results */}
-              {analysisResult && (
-                <>
-                  {console.log('🔍 Rendering EnhancedResearchDataDisplay with data:', analysisResult)}
-                  {console.log('🔍 Analysis result keys:', Object.keys(analysisResult))}
-                  {console.log('🔍 Analysis result success:', analysisResult.success)}
-                  {console.log('🔍 Analysis result tools_used:', analysisResult.tools_used)}
-                  <EnhancedResearchDataDisplay data={analysisResult} />
-                </>
-              )}
-              
-              {/* Fallback for old format */}
-              {analysisResult && analysisResult.extracted_research_data && !analysisResult.analysis_level && (
-                <ResearchDataDisplay data={analysisResult.extracted_research_data} />
-              )}
-              
-              {/* Debug fallback */}
-              {!analysisResult && (
-                <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
-                  <h3 className="text-lg font-semibold text-blue-800 mb-2">Analysis Complete</h3>
-                  <p className="text-sm text-blue-700">Analysis completed but no structured research data was extracted. Check console for full details.</p>
-                  <pre className="text-xs text-gray-600 mt-2 bg-gray-100 p-2 rounded overflow-auto max-h-40">
-                    {JSON.stringify(analysisResult, null, 2)}
-                  </pre>
-                </div>
-              )}
+            {/* Scoring and Analysis - 1/3 of screen */}
+            <div className="lg:col-span-1 flex flex-col space-y-6">
+              {/* Quality Score Display */}
+              <div className="bg-white rounded-lg shadow-lg p-6">
+                <QualityScoreDisplay data={analysisResult} />
+              </div>
+
+              {/* Scrollable Analysis Sections */}
+              <div className="flex-1 bg-white rounded-lg shadow-lg overflow-hidden">
+                <ScrollableAnalysisSections data={analysisResult} />
+              </div>
             </div>
           </div>
         )}

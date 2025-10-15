@@ -60,3 +60,128 @@ textarea:focus {
   border-color: #3b82f6 !important;
   background-color: #eff6ff !important;
 }
+
+/* New layout styles for the redesigned frontend */
+.line-clamp-4 {
+  display: -webkit-box;
+  -webkit-line-clamp: 4;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+/* Circular progress animation */
+@keyframes progress-animation {
+  from {
+    stroke-dashoffset: 376.8;
+  }
+  to {
+    stroke-dashoffset: var(--target-offset);
+  }
+}
+
+.circular-progress {
+  animation: progress-animation 1.5s ease-out forwards;
+}
+
+/* Gradient text for score labels */
+.gradient-text {
+  background: linear-gradient(135deg, #ef4444, #f59e0b, #10b981);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+}
+
+/* Enhanced shadow for cards */
+.card-shadow {
+  box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06);
+}
+
+.card-shadow:hover {
+  box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.1), 0 4px 6px -2px rgba(0, 0, 0, 0.05);
+}
+
+/* Responsive grid improvements */
+@media (max-width: 1024px) {
+  .analysis-grid {
+    grid-template-columns: 1fr;
+    gap: 1rem;
+  }
+  
+  .paper-section {
+    height: 50vh;
+  }
+  
+  .scoring-section {
+    height: auto;
+  }
+}
+
+/* Smooth scrolling for analysis sections */
+.analysis-scroll {
+  scroll-behavior: smooth;
+}
+
+.analysis-scroll::-webkit-scrollbar {
+  width: 6px;
+}
+
+.analysis-scroll::-webkit-scrollbar-track {
+  background: #f8fafc;
+  border-radius: 3px;
+}
+
+.analysis-scroll::-webkit-scrollbar-thumb {
+  background: #e2e8f0;
+  border-radius: 3px;
+}
+
+.analysis-scroll::-webkit-scrollbar-thumb:hover {
+  background: #cbd5e1;
+}
+
+/* Section button hover effects */
+.section-button {
+  transition: all 0.2s ease-in-out;
+  transform: translateY(0);
+}
+
+.section-button:hover {
+  transform: translateY(-1px);
+}
+
+.section-button:active {
+  transform: translateY(0);
+}
+
+/* Quality score color transitions */
+.score-excellent {
+  color: #10b981;
+}
+
+.score-good {
+  color: #f59e0b;
+}
+
+.score-fair {
+  color: #f97316;
+}
+
+.score-poor {
+  color: #ef4444;
+}
+
+/* Loading state improvements */
+.loading-shimmer {
+  background: linear-gradient(90deg, #f0f0f0 25%, #e0e0e0 50%, #f0f0f0 75%);
+  background-size: 200% 100%;
+  animation: shimmer 1.5s infinite;
+}
+
+@keyframes shimmer {
+  0% {
+    background-position: -200% 0;
+  }
+  100% {
+    background-position: 200% 0;
+  }
+}
