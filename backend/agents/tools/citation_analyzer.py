@@ -81,15 +81,10 @@ class CitationAnalyzerTool(BaseTool):
             Dict containing citation analysis results
         """
         try:
-            logger.info(f"Analyzing citations with type: {analysis_type}")
+            logger.info("Analyzing citations with bibliometric type")
             
-            # Generate citation analysis based on type
-            if analysis_type == "basic":
-                citation_result = self._analyze_basic_citations(text_content, citation_focus)
-            elif analysis_type == "bibliometric":
-                citation_result = self._analyze_bibliometric_citations(text_content, citation_focus)
-            else:  # detailed
-                citation_result = self._analyze_detailed_citations(text_content, citation_focus)
+            # Always use bibliometric citation analysis
+            citation_result = self._analyze_bibliometric_citations(text_content, citation_focus)
             
             return {
                 "success": True,
@@ -99,7 +94,7 @@ class CitationAnalyzerTool(BaseTool):
                 "bibliometric_indicators": citation_result.get("bibliometric_indicators", {}),
                 "citation_gaps": citation_result.get("citation_gaps", []),
                 "recommendations": citation_result.get("recommendations", []),
-                "analysis_type": analysis_type,
+                "analysis_type": "bibliometric",
                 "citation_focus": citation_focus or [],
                 "tool_used": "citation_analyzer_tool"
             }
@@ -111,136 +106,6 @@ class CitationAnalyzerTool(BaseTool):
                 "error": str(e),
                 "tool_used": "citation_analyzer_tool"
             }
-    
-    def _analyze_basic_citations(self, text_content: str, citation_focus: Optional[List[str]]) -> Dict[str, Any]:
-        """Analyze basic citation elements."""
-        try:
-            prompt = f"""
-You are an expert research analyst. Provide a basic analysis of the citations and references in this research paper.
-
-PAPER CONTENT:
-{text_content[:6000]}
-
-{f"SPECIFIC ASPECTS TO FOCUS ON: {', '.join(citation_focus)}" if citation_focus else ""}
-
-Provide basic citation analysis in JSON format:
-{{
-  "total_citations": 50,  // Estimated number of citations
-  "citation_quality": "Assessment of citation quality",
-  "reference_analysis": {{
-    "recent_sources": "How recent are the sources?",
-    "authoritative_sources": "Are sources authoritative?",
-    "coverage": "How well does the literature coverage appear?"
-  }},
-  "bibliometric_indicators": {{
-    "citation_count": "Estimated citation count",
-    "source_diversity": "Diversity of sources"
-  }},
-  "citation_gaps": [
-    "Gap 1",
-    "Gap 2"
-  ],
-  "recommendations": [
-    "Recommendation 1",
-    "Recommendation 2"
-  ]
-}}
-
-Focus on the most essential citation elements.
-"""
-            
-            llm_response = self._get_openai_client().generate_completion(
-                prompt=prompt,
-                model="gpt-3.5-turbo",
-                max_tokens=1000
-            )
-            
-            if llm_response:
-                try:
-                    return json.loads(llm_response)
-                except json.JSONDecodeError:
-                    return {"error": "Could not parse citation analysis"}
-            else:
-                return {"error": "No response from LLM"}
-                
-        except Exception as e:
-            logger.error(f"Basic citation analysis failed: {str(e)}")
-            return {"error": str(e)}
-    
-    def _analyze_detailed_citations(self, text_content: str, citation_focus: Optional[List[str]]) -> Dict[str, Any]:
-        """Analyze detailed citation elements."""
-        try:
-            prompt = f"""
-You are an expert research analyst. Provide a detailed analysis of the citations and references in this research paper.
-
-PAPER CONTENT:
-{text_content[:6000]}
-
-{f"SPECIFIC ASPECTS TO FOCUS ON: {', '.join(citation_focus)}" if citation_focus else ""}
-
-Provide detailed citation analysis in JSON format:
-{{
-  "total_citations": 50,  // Estimated number of citations
-  "citation_quality": {{
-    "relevance": "How relevant are the citations?",
-    "authority": "How authoritative are the sources?",
-    "currency": "How current are the sources?",
-    "coverage": "How comprehensive is the coverage?"
-  }},
-  "reference_analysis": {{
-    "recent_sources": {{
-      "last_5_years": "Number of sources from last 5 years",
-      "last_10_years": "Number of sources from last 10 years",
-      "older_sources": "Number of older sources"
-    }},
-    "source_types": {{
-      "journal_articles": "Number of journal articles",
-      "books": "Number of books",
-      "conference_papers": "Number of conference papers",
-      "other": "Other source types"
-    }},
-    "geographic_diversity": "Geographic diversity of sources",
-    "language_diversity": "Language diversity of sources"
-  }},
-  "bibliometric_indicators": {{
-    "citation_count": "Estimated citation count",
-    "source_diversity": "Diversity of sources",
-    "impact_factors": "Assessment of journal impact factors",
-    "h_index_considerations": "H-index considerations"
-  }},
-  "citation_gaps": [
-    {{
-      "gap": "Description of citation gap",
-      "significance": "Why this gap is important",
-      "suggested_sources": "Suggested sources to address gap"
-    }}
-  ],
-  "recommendations": [
-    "Detailed recommendation 1",
-    "Detailed recommendation 2"
-  ]
-}}
-
-Provide comprehensive analysis of all citation aspects.
-"""
-            
-            llm_response = self._get_openai_client().generate_completion(
-                prompt=prompt,
-                model="gpt-3.5-turbo",
-                max_tokens=1500
-            )
-            
-            if llm_response:
-                try:
-                    return json.loads(llm_response)
-                except json.JSONDecodeError:
-                    return {"error": "Could not parse detailed citation analysis"}
-            else:
-                return {"error": "No response from LLM"}
-                
-        except Exception as e:
-            logger.error(f"Detailed citation analysis failed: {str(e)}")
-            return {"error": str(e)}
     
     def _analyze_bibliometric_citations(self, text_content: str, citation_focus: Optional[List[str]]) -> Dict[str, Any]:
         """Analyze bibliometric citation elements."""

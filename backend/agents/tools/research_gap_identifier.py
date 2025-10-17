@@ -180,6 +180,12 @@ Provide comprehensive gap analysis in JSON format:
 }}
 
 Focus on identifying specific, actionable gaps and future directions that could advance the field.
+
+IMPORTANT: Analyze the paper thoroughly and provide different results for different papers. 
+- Count actual research gaps found (not a fixed number)
+- Identify real limitations and gaps based on content analysis
+- Provide varied recommendations based on the specific paper content
+- Ensure different papers get different gap counts and types
 """
             
             llm_response = self._get_openai_client().generate_completion(

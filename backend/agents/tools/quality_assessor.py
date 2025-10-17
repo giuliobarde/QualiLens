@@ -86,6 +86,12 @@ class QualityAssessorTool(BaseTool):
             # Calculate overall weighted score
             overall_score = self._calculate_overall_score(quality_scores, weights)
             
+            # Debug logging
+            logger.info(f"🔍 QUALITY ASSESSOR SCORES:")
+            logger.info(f"   - methodology score: {quality_scores.get('methodology', {}).get('score', 'N/A')}")
+            logger.info(f"   - overall_score: {overall_score}")
+            logger.info(f"   - quality_scores: {quality_scores}")
+            
             # Generate quality assessment
             assessment = self._generate_quality_assessment(quality_scores, overall_score, analysis_results)
             
@@ -169,6 +175,13 @@ class QualityAssessorTool(BaseTool):
         if not methodology_data or not methodology_data.get("success"):
             return 30.0  # Default low score for missing data
         
+        # Use the methodology analyzer's score if available
+        if methodology_data.get("overall_quality_score"):
+            logger.info(f"🎯 USING METHODOLOGY ANALYZER SCORE: {methodology_data.get('overall_quality_score')}")
+            return float(methodology_data.get("overall_quality_score"))
+        
+        # Fallback to quality assessor's own scoring if no methodology analyzer score
+        logger.warning("⚠️ No methodology analyzer score found, using fallback scoring")
         score = 50.0  # Base score
         
         # Study design quality

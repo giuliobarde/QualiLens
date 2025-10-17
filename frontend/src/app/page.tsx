@@ -13,7 +13,7 @@ export default function Home() {
   const [analysisResult, setAnalysisResult] = useState<any>(null);
   const [pdfContent, setPdfContent] = useState<string | null>(null);
   const [processingType, setProcessingType] = useState<'upload' | 'analysis' | 'detailed_analysis' | 'parallel_processing'>('analysis');
-  const [analysisLevel, setAnalysisLevel] = useState<'basic' | 'standard' | 'comprehensive'>('standard');
+  const [analysisLevel] = useState<'comprehensive'>('comprehensive');
   const [estimatedTime, setEstimatedTime] = useState<number | undefined>(undefined);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -92,9 +92,9 @@ export default function Home() {
         setProcessingType('upload');
         response = await agentService.uploadFile(attachedFile);
       } else {
-        // Handle text query with analysis level
-        console.log('Processing query:', query, 'with analysis level:', analysisLevel);
-        const enhancedQuery = `${query} (Analysis level: ${analysisLevel})`;
+        // Handle text query with comprehensive analysis
+        console.log('Processing query:', query, 'with comprehensive analysis');
+        const enhancedQuery = `${query} (Analysis level: comprehensive)`;
         response = await agentService.queryAgent({ query: enhancedQuery });
       }
       
@@ -119,6 +119,16 @@ export default function Home() {
         console.log('- reproducibility:', response.result.reproducibility);
         console.log('- research_gaps:', response.result.research_gaps);
         console.log('- citations:', response.result.citations);
+        
+        // CRITICAL: Debug quality score data
+        console.log('🎯 QUALITY SCORE DEBUG:');
+        console.log('- overall_quality_score:', response.result.overall_quality_score);
+        console.log('- quality_breakdown:', response.result.quality_breakdown);
+        console.log('- quantitative_scores:', response.result.quantitative_scores);
+        console.log('- methodology_quality_rating:', response.result.methodology_quality_rating);
+        console.log('- reproducibility_score:', response.result.reproducibility_score);
+        console.log('- detected_biases:', response.result.detected_biases);
+        console.log('- statistical_concerns:', response.result.statistical_concerns);
       }
       
       // Store the analysis result for display
@@ -212,55 +222,6 @@ export default function Home() {
                     </div>
                   </div>
 
-                  {/* Analysis Level Selector */}
-                  <div className="bg-gray-50 p-4 rounded-lg">
-                    <label className="block text-sm font-medium text-gray-700 mb-2">
-                      Analysis Level
-                    </label>
-                    <div className="flex space-x-4">
-                      <label className="flex items-center">
-                        <input
-                          type="radio"
-                          name="analysisLevel"
-                          value="basic"
-                          checked={analysisLevel === 'basic'}
-                          onChange={(e) => setAnalysisLevel(e.target.value as 'basic')}
-                          className="mr-2"
-                          disabled={isLoading}
-                        />
-                        <span className="text-sm text-gray-700">Basic (Summary only)</span>
-                      </label>
-                      <label className="flex items-center">
-                        <input
-                          type="radio"
-                          name="analysisLevel"
-                          value="standard"
-                          checked={analysisLevel === 'standard'}
-                          onChange={(e) => setAnalysisLevel(e.target.value as 'standard')}
-                          className="mr-2"
-                          disabled={isLoading}
-                        />
-                        <span className="text-sm text-gray-700">Standard (3 tools)</span>
-                      </label>
-                      <label className="flex items-center">
-                        <input
-                          type="radio"
-                          name="analysisLevel"
-                          value="comprehensive"
-                          checked={analysisLevel === 'comprehensive'}
-                          onChange={(e) => setAnalysisLevel(e.target.value as 'comprehensive')}
-                          className="mr-2"
-                          disabled={isLoading}
-                        />
-                        <span className="text-sm text-gray-700">Comprehensive (6 tools)</span>
-                      </label>
-                    </div>
-                    <p className="text-xs text-gray-500 mt-2">
-                      {analysisLevel === 'basic' && 'Quick summary analysis using content summarization only.'}
-                      {analysisLevel === 'standard' && 'Standard analysis using content summarization, bias detection, and methodology analysis.'}
-                      {analysisLevel === 'comprehensive' && 'Comprehensive analysis using all 6 specialized tools including statistics, reproducibility, research gaps, and citations.'}
-                    </p>
-                  </div>
 
                   {/* Attached File Display */}
                   {attachedFile && (

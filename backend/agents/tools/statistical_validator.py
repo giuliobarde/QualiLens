@@ -81,15 +81,10 @@ class StatisticalValidatorTool(BaseTool):
             Dict containing statistical validation results
         """
         try:
-            logger.info(f"Validating statistics with level: {validation_level}")
+            logger.info("Validating statistics with comprehensive level")
             
-            # Generate statistical validation based on level
-            if validation_level == "basic":
-                validation_result = self._validate_basic_statistics(text_content, statistical_tests)
-            elif validation_level == "comprehensive":
-                validation_result = self._validate_comprehensive_statistics(text_content, statistical_tests)
-            else:  # detailed
-                validation_result = self._validate_detailed_statistics(text_content, statistical_tests)
+            # Always use comprehensive statistical validation
+            validation_result = self._validate_comprehensive_statistics(text_content, statistical_tests)
             
             return {
                 "success": True,
@@ -100,7 +95,7 @@ class StatisticalValidatorTool(BaseTool):
                 "effect_size_interpretation": validation_result.get("effect_size_interpretation", ""),
                 "statistical_concerns": validation_result.get("statistical_concerns", []),
                 "recommendations": validation_result.get("recommendations", []),
-                "validation_level": validation_level,
+                "validation_level": "comprehensive",
                 "statistical_tests_requested": statistical_tests or [],
                 "tool_used": "statistical_validator_tool"
             }
@@ -112,161 +107,6 @@ class StatisticalValidatorTool(BaseTool):
                 "error": str(e),
                 "tool_used": "statistical_validator_tool"
             }
-    
-    def _validate_basic_statistics(self, text_content: str, statistical_tests: Optional[List[str]]) -> Dict[str, Any]:
-        """Validate basic statistical elements."""
-        try:
-            prompt = f"""
-You are an expert statistician. Provide a basic validation of the statistical methods used in this research.
-
-PAPER CONTENT:
-{text_content[:6000]}
-
-{f"SPECIFIC TESTS TO VALIDATE: {', '.join(statistical_tests)}" if statistical_tests else ""}
-
-Provide basic statistical validation in JSON format:
-{{
-  "statistical_tests_used": [
-    "Test 1",
-    "Test 2"
-  ],
-  "test_appropriateness": {{
-    "overall": "Are the statistical tests appropriate for the research question?",
-    "concerns": ["Any major concerns about test selection"]
-  }},
-  "assumptions_met": {{
-    "normality": "Were normality assumptions checked?",
-    "independence": "Were independence assumptions met?",
-    "homogeneity": "Were homogeneity assumptions checked?"
-  }},
-  "power_analysis": {{
-    "conducted": "Was power analysis conducted?",
-    "adequate": "Was the sample size adequate?"
-  }},
-  "effect_size_interpretation": "How were effect sizes interpreted?",
-  "statistical_concerns": [
-    "Concern 1",
-    "Concern 2"
-  ],
-  "recommendations": [
-    "Recommendation 1",
-    "Recommendation 2"
-  ]
-}}
-
-Focus on the most essential statistical validation elements.
-"""
-            
-            llm_response = self._get_openai_client().generate_completion(
-                prompt=prompt,
-                model="gpt-3.5-turbo",
-                max_tokens=1200
-            )
-            
-            if llm_response:
-                try:
-                    return json.loads(llm_response)
-                except json.JSONDecodeError:
-                    return {"error": "Could not parse statistical validation"}
-            else:
-                return {"error": "No response from LLM"}
-                
-        except Exception as e:
-            logger.error(f"Basic statistical validation failed: {str(e)}")
-            return {"error": str(e)}
-    
-    def _validate_detailed_statistics(self, text_content: str, statistical_tests: Optional[List[str]]) -> Dict[str, Any]:
-        """Validate detailed statistical elements."""
-        try:
-            prompt = f"""
-You are an expert statistician. Provide a detailed validation of the statistical methods used in this research.
-
-PAPER CONTENT:
-{text_content[:6000]}
-
-{f"SPECIFIC TESTS TO VALIDATE: {', '.join(statistical_tests)}" if statistical_tests else ""}
-
-Provide detailed statistical validation in JSON format:
-{{
-  "statistical_tests_used": [
-    {{
-      "test_name": "Test name",
-      "purpose": "What this test was used for",
-      "appropriateness": "How appropriate this test is",
-      "assumptions": "Statistical assumptions for this test"
-    }}
-  ],
-  "test_appropriateness": {{
-    "overall": "Overall assessment of test appropriateness",
-    "specific_tests": {{
-      "test1": "Assessment of test 1",
-      "test2": "Assessment of test 2"
-    }},
-    "concerns": ["Specific concerns about test selection"],
-    "alternatives": ["Alternative tests that could have been used"]
-  }},
-  "assumptions_met": {{
-    "normality": {{
-      "checked": "Were normality assumptions checked?",
-      "method": "How were they checked?",
-      "violations": "Any violations found?"
-    }},
-    "independence": {{
-      "assessed": "Were independence assumptions assessed?",
-      "violations": "Any violations found?"
-    }},
-    "homogeneity": {{
-      "checked": "Were homogeneity assumptions checked?",
-      "method": "How were they checked?",
-      "violations": "Any violations found?"
-    }},
-    "other_assumptions": "Other statistical assumptions checked"
-  }},
-  "power_analysis": {{
-    "conducted": "Was power analysis conducted?",
-    "method": "What method was used?",
-    "effect_size": "What effect size was assumed?",
-    "power_achieved": "What power was achieved?",
-    "adequate": "Was the sample size adequate?"
-  }},
-  "effect_size_interpretation": {{
-    "reported": "Were effect sizes reported?",
-    "interpretation": "How were they interpreted?",
-    "clinical_significance": "Clinical significance discussed?"
-  }},
-  "statistical_concerns": [
-    {{
-      "concern": "Description of concern",
-      "severity": "low/medium/high",
-      "impact": "How this affects the results"
-    }}
-  ],
-  "recommendations": [
-    "Specific recommendation 1",
-    "Specific recommendation 2"
-  ]
-}}
-
-Provide comprehensive analysis of all statistical aspects.
-"""
-            
-            llm_response = self._get_openai_client().generate_completion(
-                prompt=prompt,
-                model="gpt-3.5-turbo",
-                max_tokens=2000
-            )
-            
-            if llm_response:
-                try:
-                    return json.loads(llm_response)
-                except json.JSONDecodeError:
-                    return {"error": "Could not parse detailed statistical validation"}
-            else:
-                return {"error": "No response from LLM"}
-                
-        except Exception as e:
-            logger.error(f"Detailed statistical validation failed: {str(e)}")
-            return {"error": str(e)}
     
     def _validate_comprehensive_statistics(self, text_content: str, statistical_tests: Optional[List[str]]) -> Dict[str, Any]:
         """Validate comprehensive statistical elements."""

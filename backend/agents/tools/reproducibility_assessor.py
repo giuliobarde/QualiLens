@@ -123,7 +123,7 @@ PAPER CONTENT:
 
 Provide basic reproducibility assessment in JSON format:
 {{
-  "reproducibility_score": 0.75,  // 0.0-1.0 scale
+  "reproducibility_score": 0.0-1.0,  // Calculate actual score based on content analysis
   "methodological_detail": "Assessment of methodological detail provided",
   "data_availability": "Information about data availability",
   "code_availability": "Information about code availability",
@@ -136,6 +136,13 @@ Provide basic reproducibility assessment in JSON format:
     "Recommendation 2"
   ]
 }}
+
+IMPORTANT: Calculate the reproducibility_score based on actual content analysis. Consider:
+- Methodological detail provided (0.0-0.3 points)
+- Data availability mentioned (0.0-0.3 points) 
+- Code availability mentioned (0.0-0.2 points)
+- Reproducibility barriers identified (0.0-0.2 points)
+- Provide a realistic score between 0.0 and 1.0 based on the actual content
 
 Focus on the most essential reproducibility elements.
 """
@@ -171,7 +178,7 @@ PAPER CONTENT:
 
 Provide detailed reproducibility assessment in JSON format:
 {{
-  "reproducibility_score": 0.75,  // 0.0-1.0 scale
+  "reproducibility_score": 0.0-1.0,  // Calculate actual score based on content analysis
   "methodological_detail": {{
     "sufficient": "Is methodological detail sufficient for replication?",
     "missing_elements": ["Missing methodological elements"],

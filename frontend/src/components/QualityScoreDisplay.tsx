@@ -1,55 +1,173 @@
 'use client';
 
-import React from 'react';
+import React, { useEffect, useState } from 'react';
 
 interface QualityScoreDisplayProps {
   data: any;
   className?: string;
 }
 
+interface ScoreBreakdown {
+  methodology: number;
+  reproducibility: number;
+  bias: number;
+  statistics: number;
+  overall: number;
+  source: string;
+}
+
 export default function QualityScoreDisplay({ data, className = '' }: QualityScoreDisplayProps) {
-  // Calculate overall quality score
-  const getOverallScore = () => {
-    if (data?.overall_quality_score !== undefined) {
-      return data.overall_quality_score;
+  const [scoreBreakdown, setScoreBreakdown] = useState<ScoreBreakdown | null>(null);
+  const [debugInfo, setDebugInfo] = useState<string>('');
+
+  // Comprehensive score calculation with debugging
+  const calculateComprehensiveScore = (): ScoreBreakdown => {
+    console.log('🔍 QUALITY SCORE CALCULATION DEBUG:');
+    console.log('Raw data received:', data);
+    
+    let debugLog = 'Score Calculation Debug:\n';
+    debugLog += `Data keys: ${Object.keys(data || {})}\n`;
+    
+    // Method 1: Direct overall_quality_score from backend
+    if (data?.overall_quality_score !== undefined && data?.overall_quality_score !== null) {
+      const directScore = Number(data.overall_quality_score);
+      debugLog += `✅ Found direct overall_quality_score: ${directScore}\n`;
+      console.log('✅ Using direct overall_quality_score:', directScore);
+      
+      // Check if this is a suspiciously low score (likely from quality assessor override)
+      if (directScore < 50 && data?.quantitative_scores?.scores?.overall_score > directScore) {
+        const methodologyScore = data.quantitative_scores.scores.overall_score;
+        debugLog += `⚠️ Low score detected (${directScore}), using methodology score: ${methodologyScore}\n`;
+        console.log('⚠️ Using methodology analyzer score instead of quality assessor:', methodologyScore);
+        return {
+          methodology: methodologyScore,
+          reproducibility: methodologyScore,
+          bias: methodologyScore,
+          statistics: methodologyScore,
+          overall: methodologyScore,
+          source: 'methodology_override'
+        };
+      }
+      
+      return {
+        methodology: directScore,
+        reproducibility: directScore,
+        bias: directScore,
+        statistics: directScore,
+        overall: directScore,
+        source: 'direct_backend_score'
+      };
     }
     
-    // Calculate from various metrics if available
+    // Method 2: Check quality_breakdown from quality assessor
+    if (data?.quality_breakdown) {
+      debugLog += `Found quality_breakdown: ${JSON.stringify(data.quality_breakdown)}\n`;
+      const breakdown = data.quality_breakdown;
+      const methodology = breakdown.methodology?.score || 0;
+      const reproducibility = breakdown.reproducibility?.score || 0;
+      const bias = breakdown.bias?.score || 0;
+      const statistics = breakdown.statistics?.score || 0;
+      
+      const overall = (methodology + reproducibility + bias + statistics) / 4;
+      debugLog += `Calculated from quality_breakdown: ${overall}\n`;
+      console.log('✅ Using quality_breakdown scores:', { methodology, reproducibility, bias, statistics, overall });
+      return {
+        methodology,
+        reproducibility,
+        bias,
+        statistics,
+        overall,
+        source: 'quality_breakdown'
+      };
+    }
+    
+    // Method 3: Check quantitative_scores from methodology analyzer
+    if (data?.quantitative_scores?.scores) {
+      debugLog += `Found quantitative_scores: ${JSON.stringify(data.quantitative_scores.scores)}\n`;
+      const scores = data.quantitative_scores.scores;
+      const overall = scores.overall_score || 0;
+      debugLog += `Using quantitative_scores overall: ${overall}\n`;
+      console.log('✅ Using quantitative_scores:', overall);
+      return {
+        methodology: scores.study_design || 0,
+        reproducibility: scores.data_collection || 0,
+        bias: scores.validity_measures || 0,
+        statistics: scores.analysis_methods || 0,
+        overall,
+        source: 'quantitative_scores'
+      };
+    }
+    
+    // Method 4: Calculate from individual metrics
+    debugLog += 'Calculating from individual metrics...\n';
     let totalScore = 0;
     let count = 0;
+    const scores: any = {};
     
-    // Methodology quality
+    // Methodology quality from rating
     if (data?.methodology_quality_rating) {
       const methodologyScore = data.methodology_quality_rating.toLowerCase().includes('high') ? 90 :
                               data.methodology_quality_rating.toLowerCase().includes('medium') ? 70 : 50;
+      scores.methodology = methodologyScore;
       totalScore += methodologyScore;
       count++;
+      debugLog += `Methodology rating: ${data.methodology_quality_rating} -> ${methodologyScore}\n`;
     }
     
     // Reproducibility score
     if (data?.reproducibility_score !== undefined) {
-      totalScore += data.reproducibility_score * 100;
+      const reproScore = data.reproducibility_score * 100;
+      scores.reproducibility = reproScore;
+      totalScore += reproScore;
       count++;
+      debugLog += `Reproducibility score: ${data.reproducibility_score} -> ${reproScore}\n`;
     }
     
     // Bias assessment (inverse - fewer biases = higher score)
     if (data?.detected_biases && Array.isArray(data.detected_biases)) {
       const biasScore = Math.max(0, 100 - (data.detected_biases.length * 20));
+      scores.bias = biasScore;
       totalScore += biasScore;
       count++;
+      debugLog += `Bias assessment: ${data.detected_biases.length} biases -> ${biasScore}\n`;
     }
     
     // Statistical concerns (inverse)
     if (data?.statistical_concerns && Array.isArray(data.statistical_concerns)) {
       const statsScore = Math.max(0, 100 - (data.statistical_concerns.length * 15));
+      scores.statistics = statsScore;
       totalScore += statsScore;
       count++;
+      debugLog += `Statistical concerns: ${data.statistical_concerns.length} concerns -> ${statsScore}\n`;
     }
     
-    return count > 0 ? totalScore / count : 75; // Default to 75 if no data
+    const overall = count > 0 ? totalScore / count : 50; // Default to 50 instead of 75
+    debugLog += `Final calculation: ${totalScore} / ${count} = ${overall}\n`;
+    debugLog += `Source: individual_metrics\n`;
+    
+    console.log('✅ Calculated from individual metrics:', { scores, overall, count });
+    
+    return {
+      methodology: scores.methodology || overall,
+      reproducibility: scores.reproducibility || overall,
+      bias: scores.bias || overall,
+      statistics: scores.statistics || overall,
+      overall,
+      source: 'individual_metrics'
+    };
   };
 
-  const score = getOverallScore();
+  // Calculate score when data changes
+  useEffect(() => {
+    if (data) {
+      const breakdown = calculateComprehensiveScore();
+      setScoreBreakdown(breakdown);
+      setDebugInfo(breakdown.source);
+      console.log('🎯 Final score breakdown:', breakdown);
+    }
+  }, [data]);
+
+  const score = scoreBreakdown?.overall || 0;
   const normalizedScore = Math.max(0, Math.min(100, score));
   
   // Calculate color based on score
@@ -59,7 +177,6 @@ export default function QualityScoreDisplay({ data, className = '' }: QualitySco
     if (score >= 40) return '#F97316'; // Orange
     return '#EF4444'; // Red
   };
-
 
   const getScoreLabel = (score: number) => {
     if (score >= 85) return 'Excellent';
@@ -91,9 +208,39 @@ export default function QualityScoreDisplay({ data, className = '' }: QualitySco
     return `linear-gradient(to right, #EF4444 0%, ${targetColor} 100%)`;
   };
 
+  // Debug display component
+  const DebugInfo = () => {
+    if (process.env.NODE_ENV === 'development') {
+      return (
+        <div className="mt-4 p-2 bg-gray-100 rounded text-xs">
+          <div className="font-semibold">Debug Info:</div>
+          <div>Score Source: {debugInfo}</div>
+          <div>Raw Score: {score}</div>
+          <div>Normalized: {normalizedScore}</div>
+          {scoreBreakdown && (
+            <div>
+              Breakdown: M:{scoreBreakdown.methodology.toFixed(1)} 
+              R:{scoreBreakdown.reproducibility.toFixed(1)} 
+              B:{scoreBreakdown.bias.toFixed(1)} 
+              S:{scoreBreakdown.statistics.toFixed(1)}
+            </div>
+          )}
+        </div>
+      );
+    }
+    return null;
+  };
+
   return (
     <div className={`text-center ${className}`}>
       <h3 className="text-lg font-semibold text-gray-800 mb-4">Overall Quality Score</h3>
+      
+      {/* Score Source Indicator */}
+      {debugInfo && (
+        <div className="mb-2 text-xs text-gray-500">
+          Source: {debugInfo.replace('_', ' ').toUpperCase()}
+        </div>
+      )}
       
       {/* Horizontal Progress Bar */}
       <div className="relative w-full max-w-md mx-auto">
@@ -127,6 +274,31 @@ export default function QualityScoreDisplay({ data, className = '' }: QualitySco
         </div>
       </div>
       
+      {/* Score Breakdown (if available) */}
+      {scoreBreakdown && scoreBreakdown.source !== 'direct_backend_score' && (
+        <div className="mt-4 p-3 bg-gray-50 rounded-lg">
+          <div className="text-sm font-semibold text-gray-700 mb-2">Score Breakdown</div>
+          <div className="grid grid-cols-2 gap-2 text-xs">
+            <div className="flex justify-between">
+              <span>Methodology:</span>
+              <span className="font-semibold">{Math.round(scoreBreakdown.methodology)}</span>
+            </div>
+            <div className="flex justify-between">
+              <span>Reproducibility:</span>
+              <span className="font-semibold">{Math.round(scoreBreakdown.reproducibility)}</span>
+            </div>
+            <div className="flex justify-between">
+              <span>Bias:</span>
+              <span className="font-semibold">{Math.round(scoreBreakdown.bias)}</span>
+            </div>
+            <div className="flex justify-between">
+              <span>Statistics:</span>
+              <span className="font-semibold">{Math.round(scoreBreakdown.statistics)}</span>
+            </div>
+          </div>
+        </div>
+      )}
+      
       {/* Additional metrics */}
       <div className="mt-6 grid grid-cols-2 gap-4 text-xs">
         {data?.tools_used && (
@@ -159,6 +331,9 @@ export default function QualityScoreDisplay({ data, className = '' }: QualitySco
           </div>
         )}
       </div>
+      
+      {/* Debug Info (Development only) */}
+      <DebugInfo />
     </div>
   );
 }

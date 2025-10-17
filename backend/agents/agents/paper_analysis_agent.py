@@ -183,39 +183,8 @@ class PaperAnalysisAgent(BaseAgent):
             )
     
     def _determine_analysis_level(self, query: str) -> str:
-        """Determine the appropriate analysis level based on the query."""
-        query_lower = query.lower()
-        
-        # Check for explicit analysis level in the query (from frontend)
-        if "analysis level: comprehensive" in query_lower:
-            return "comprehensive"
-        elif "analysis level: standard" in query_lower:
-            return "standard"
-        elif "analysis level: basic" in query_lower:
-            return "basic"
-        
-        # Check for comprehensive analysis keywords
-        comprehensive_keywords = [
-            "comprehensive analysis", "detailed analysis", "full analysis",
-            "complete analysis", "thorough analysis", "in-depth analysis",
-            "comprehensive", "detailed", "full", "complete", "thorough"
-        ]
-        
-        if any(keyword in query_lower for keyword in comprehensive_keywords):
-            return "comprehensive"
-        
-        # Check for standard analysis keywords
-        standard_keywords = [
-            "analyze", "analysis", "evaluate", "assess", "review",
-            "methodology", "bias", "quality", "summary", "statistics",
-            "reproducibility", "gaps", "citations"
-        ]
-        
-        if any(keyword in query_lower for keyword in standard_keywords):
-            return "standard"
-        
-        # Default to basic analysis
-        return "basic"
+        """Always return comprehensive analysis level."""
+        return "comprehensive"
     
     def _parse_pdf_if_needed(self, params: Dict[str, Any]) -> Optional[Dict[str, Any]]:
         """Parse PDF if file path is provided."""
@@ -238,146 +207,94 @@ class PaperAnalysisAgent(BaseAgent):
         return None
     
     def _run_analysis_pipeline(self, text_content: str, analysis_level: str, query: str) -> Dict[str, Any]:
-        """Run the appropriate analysis pipeline based on level."""
+        """Run comprehensive analysis pipeline with all tools."""
         results = {
             "tools_used": [],
-            "analysis_level": analysis_level
+            "analysis_level": "comprehensive"
         }
         
         try:
-            if analysis_level == "basic":
-                # Basic analysis: Content summarization only
-                logger.info("Executing basic analysis - content summarizer only")
-                summary_result = self.execute_tool(
-                    "content_summarizer_tool",
-                    text_content=text_content,
-                    summary_type="comprehensive",
-                    max_length=300
-                )
-                logger.info(f"Content summarizer result: {summary_result.get('success', False)}")
-                if summary_result.get("success"):
-                    results["content_summary"] = summary_result
-                    results["tools_used"].append("content_summarizer_tool")
-                    logger.info("Content summarizer tool added to results")
-                else:
-                    logger.error(f"Content summarizer failed: {summary_result.get('error', 'Unknown error')}")
+            logger.info("Executing comprehensive analysis with all tools")
             
-            elif analysis_level == "standard":
-                # Standard analysis: Content summarization + Bias detection + Methodology analysis
-                
-                # Content summarization
-                summary_result = self.execute_tool(
-                    "content_summarizer_tool",
-                    text_content=text_content,
-                    summary_type="comprehensive",
-                    max_length=500
-                )
-                if summary_result.get("success"):
-                    results["content_summary"] = summary_result
-                    results["tools_used"].append("content_summarizer_tool")
-                
-                # Bias detection
-                bias_result = self.execute_tool(
-                    "bias_detection_tool",
-                    text_content=text_content,
-                    severity_threshold="medium"
-                )
-                if bias_result.get("success"):
-                    results["bias_analysis"] = bias_result
-                    results["tools_used"].append("bias_detection_tool")
-                
-                # Methodology analysis
-                methodology_result = self.execute_tool(
-                    "methodology_analyzer_tool",
-                    text_content=text_content,
-                    analysis_depth="detailed"
-                )
-                if methodology_result.get("success"):
-                    results["methodology_analysis"] = methodology_result
-                    results["tools_used"].append("methodology_analyzer_tool")
+            # Content summarization
+            summary_result = self.execute_tool(
+                "content_summarizer_tool",
+                text_content=text_content,
+                summary_type="comprehensive",
+                max_length=800
+            )
+            if summary_result.get("success"):
+                results["content_summary"] = summary_result
+                results["tools_used"].append("content_summarizer_tool")
             
-            else:  # comprehensive
-                # Comprehensive analysis: All Phase 1 and Phase 2 tools
-                
-                # Content summarization
-                summary_result = self.execute_tool(
-                    "content_summarizer_tool",
-                    text_content=text_content,
-                    summary_type="comprehensive",
-                    max_length=800
-                )
-                if summary_result.get("success"):
-                    results["content_summary"] = summary_result
-                    results["tools_used"].append("content_summarizer_tool")
-                
-                # Bias detection
-                bias_result = self.execute_tool(
-                    "bias_detection_tool",
-                    text_content=text_content,
-                    severity_threshold="low"
-                )
-                if bias_result.get("success"):
-                    results["bias_analysis"] = bias_result
-                    results["tools_used"].append("bias_detection_tool")
-                
-                # Methodology analysis
-                methodology_result = self.execute_tool(
-                    "methodology_analyzer_tool",
-                    text_content=text_content,
-                    analysis_depth="comprehensive"
-                )
-                if methodology_result.get("success"):
-                    results["methodology_analysis"] = methodology_result
-                    results["tools_used"].append("methodology_analyzer_tool")
-                
-                # Statistical validation
-                statistical_result = self.execute_tool(
-                    "statistical_validator_tool",
-                    text_content=text_content,
-                    validation_level="comprehensive"
-                )
-                if statistical_result.get("success"):
-                    results["statistical_analysis"] = statistical_result
-                    results["tools_used"].append("statistical_validator_tool")
-                
-                # Reproducibility assessment
-                reproducibility_result = self.execute_tool(
-                    "reproducibility_assessor_tool",
-                    text_content=text_content,
-                    reproducibility_level="detailed"
-                )
-                if reproducibility_result.get("success"):
-                    results["reproducibility_analysis"] = reproducibility_result
-                    results["tools_used"].append("reproducibility_assessor_tool")
-                
-                # Research gap identification
-                gap_result = self.execute_tool(
-                    "research_gap_identifier_tool",
-                    text_content=text_content,
-                    future_focus="comprehensive"
-                )
-                if gap_result.get("success"):
-                    results["research_gap_analysis"] = gap_result
-                    results["tools_used"].append("research_gap_identifier_tool")
-                
-                # Citation analysis
-                citation_result = self.execute_tool(
-                    "citation_analyzer_tool",
-                    text_content=text_content,
-                    analysis_type="bibliometric"
-                )
-                if citation_result.get("success"):
-                    results["citation_analysis"] = citation_result
-                    results["tools_used"].append("citation_analyzer_tool")
-                
-                # Quality assessment (using results from all other tools)
-                quality_result = self.execute_tool(
-                    "quality_assessor_tool",
-                    analysis_results=results
-                )
-                if quality_result.get("success"):
-                    results["quality_assessment"] = quality_result
-                    results["tools_used"].append("quality_assessor_tool")
+            # Bias detection
+            bias_result = self.execute_tool(
+                "bias_detection_tool",
+                text_content=text_content,
+                severity_threshold="low"
+            )
+            if bias_result.get("success"):
+                results["bias_analysis"] = bias_result
+                results["tools_used"].append("bias_detection_tool")
+            
+            # Methodology analysis
+            methodology_result = self.execute_tool(
+                "methodology_analyzer_tool",
+                text_content=text_content,
+                analysis_depth="comprehensive"
+            )
+            if methodology_result.get("success"):
+                results["methodology_analysis"] = methodology_result
+                results["tools_used"].append("methodology_analyzer_tool")
+            
+            # Statistical validation
+            statistical_result = self.execute_tool(
+                "statistical_validator_tool",
+                text_content=text_content,
+                validation_level="comprehensive"
+            )
+            if statistical_result.get("success"):
+                results["statistical_analysis"] = statistical_result
+                results["tools_used"].append("statistical_validator_tool")
+            
+            # Reproducibility assessment
+            reproducibility_result = self.execute_tool(
+                "reproducibility_assessor_tool",
+                text_content=text_content,
+                reproducibility_level="detailed"
+            )
+            if reproducibility_result.get("success"):
+                results["reproducibility_analysis"] = reproducibility_result
+                results["tools_used"].append("reproducibility_assessor_tool")
+            
+            # Research gap identification
+            gap_result = self.execute_tool(
+                "research_gap_identifier_tool",
+                text_content=text_content,
+                future_focus="comprehensive"
+            )
+            if gap_result.get("success"):
+                results["research_gap_analysis"] = gap_result
+                results["tools_used"].append("research_gap_identifier_tool")
+            
+            # Citation analysis
+            citation_result = self.execute_tool(
+                "citation_analyzer_tool",
+                text_content=text_content,
+                analysis_type="bibliometric"
+            )
+            if citation_result.get("success"):
+                results["citation_analysis"] = citation_result
+                results["tools_used"].append("citation_analyzer_tool")
+            
+            # Quality assessment (using results from all other tools)
+            quality_result = self.execute_tool(
+                "quality_assessor_tool",
+                analysis_results=results
+            )
+            if quality_result.get("success"):
+                results["quality_assessment"] = quality_result
+                results["tools_used"].append("quality_assessor_tool")
             
             return results
             
@@ -386,7 +303,7 @@ class PaperAnalysisAgent(BaseAgent):
             return {
                 "tools_used": results["tools_used"],
                 "error": str(e),
-                "analysis_level": analysis_level
+                "analysis_level": "comprehensive"
             }
     
     def _integrate_analysis_results(self, text_content: str, analysis_results: Dict[str, Any], 
@@ -395,7 +312,7 @@ class PaperAnalysisAgent(BaseAgent):
         try:
             integrated_result = {
                 "success": True,
-                "analysis_level": analysis_results.get("analysis_level", "basic"),
+                "analysis_level": analysis_results.get("analysis_level", "comprehensive"),
                 "tools_used": analysis_results.get("tools_used", []),
                 "query": query,
                 "text_length": len(text_content),
@@ -424,11 +341,22 @@ class PaperAnalysisAgent(BaseAgent):
             # Add methodology analysis if available
             if "methodology_analysis" in analysis_results:
                 methodology_data = analysis_results["methodology_analysis"]
+                logger.info(f"🔍 METHODOLOGY DATA IN INTEGRATION:")
+                logger.info(f"   - methodology_data keys: {list(methodology_data.keys())}")
+                logger.info(f"   - overall_quality_score: {methodology_data.get('overall_quality_score')}")
+                logger.info(f"   - quantitative_scores: {methodology_data.get('quantitative_scores', {})}")
+                
                 integrated_result["study_design"] = methodology_data.get("study_design", "")
                 integrated_result["sample_characteristics"] = methodology_data.get("sample_characteristics", {})
                 integrated_result["methodological_strengths"] = methodology_data.get("methodological_strengths", [])
                 integrated_result["methodological_weaknesses"] = methodology_data.get("methodological_weaknesses", [])
                 integrated_result["methodology_quality_rating"] = methodology_data.get("quality_rating", "")
+                # Add the overall quality score from methodology analysis
+                if methodology_data.get("overall_quality_score"):
+                    integrated_result["overall_quality_score"] = methodology_data.get("overall_quality_score")
+                    logger.info(f"✅ SET overall_quality_score to: {methodology_data.get('overall_quality_score')}")
+                else:
+                    logger.warning(f"⚠️ NO overall_quality_score found in methodology_data")
             
             # Add statistical analysis if available
             if "statistical_analysis" in analysis_results:
@@ -464,10 +392,17 @@ class PaperAnalysisAgent(BaseAgent):
                 integrated_result["citation_gaps"] = citation_data.get("citation_gaps", [])
                 integrated_result["bibliometric_indicators"] = citation_data.get("bibliometric_indicators", {})
             
-            # Add quality assessment if available
+            # Add quality assessment if available (but don't override methodology score)
             if "quality_assessment" in analysis_results:
                 quality_data = analysis_results["quality_assessment"]
-                integrated_result["overall_quality_score"] = quality_data.get("overall_quality_score", 0.0)
+                
+                # Only use quality assessor score if no methodology score exists
+                if not integrated_result.get("overall_quality_score") or integrated_result.get("overall_quality_score") == 0:
+                    integrated_result["overall_quality_score"] = quality_data.get("overall_quality_score", 0.0)
+                    logger.info(f"⚠️ Using quality assessor score: {quality_data.get('overall_quality_score', 0.0)}")
+                else:
+                    logger.info(f"✅ Keeping methodology analyzer score: {integrated_result.get('overall_quality_score')} (ignoring quality assessor: {quality_data.get('overall_quality_score', 0.0)})")
+                
                 integrated_result["quality_breakdown"] = quality_data.get("quality_breakdown", {})
                 integrated_result["quality_strengths"] = quality_data.get("strengths", [])
                 integrated_result["quality_weaknesses"] = quality_data.get("weaknesses", [])
@@ -477,6 +412,12 @@ class PaperAnalysisAgent(BaseAgent):
             
             # Generate overall assessment
             integrated_result["overall_assessment"] = self._generate_overall_assessment(analysis_results)
+            
+            # Debug logging for final result
+            logger.info(f"🔍 FINAL INTEGRATED RESULT:")
+            logger.info(f"   - overall_quality_score: {integrated_result.get('overall_quality_score')}")
+            logger.info(f"   - methodology_quality_rating: {integrated_result.get('methodology_quality_rating')}")
+            logger.info(f"   - All keys: {list(integrated_result.keys())}")
             
             return integrated_result
             
@@ -501,12 +442,8 @@ class PaperAnalysisAgent(BaseAgent):
             # Assess completeness
             available_analyses = [key for key in analysis_results.keys() 
                                if key not in ["tools_used", "analysis_level", "error"]]
-            if len(available_analyses) >= 6:  # All Phase 1 + Phase 2 tools
-                assessment["analysis_completeness"] = "comprehensive"
-            elif len(available_analyses) >= 3:  # All Phase 1 tools
-                assessment["analysis_completeness"] = "standard"
-            elif len(available_analyses) >= 1:  # Basic analysis
-                assessment["analysis_completeness"] = "basic"
+            # Always comprehensive analysis
+            assessment["analysis_completeness"] = "comprehensive"
             
             # Extract key strengths from methodology analysis
             if "methodology_analysis" in analysis_results:
