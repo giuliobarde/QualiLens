@@ -108,108 +108,217 @@ class ResearchGapIdentifierTool(BaseTool):
             }
     
     def _identify_research_gaps(self, text_content: str, gap_types: Optional[List[str]], future_focus: str) -> Dict[str, Any]:
-        """Identify research gaps and future directions."""
+        """
+        Identify research gaps and future directions using two-step chain-of-thought reasoning.
+
+        Step 1: Brainstorm potential research gaps (creative, temperature > 0)
+        Step 2: Verify and evaluate each potential gap (deterministic, temperature = 0)
+        """
         try:
-            prompt = f"""
-You are an expert research analyst. Identify research gaps and future directions in this research paper.
+            # STEP 1: Brainstorm potential research gaps (more creative)
+            logger.info("Step 1: Brainstorming potential research gaps...")
+            brainstorm_prompt = f"""
+You are an expert research analyst with deep knowledge across multiple domains. Your task is to BRAINSTORM potential research gaps in this paper.
 
 PAPER CONTENT:
 {text_content[:6000]}
 
-{f"SPECIFIC GAP TYPES TO IDENTIFY: {', '.join(gap_types)}" if gap_types else ""}
+{f"SPECIFIC GAP TYPES TO CONSIDER: {', '.join(gap_types)}" if gap_types else ""}
 FUTURE FOCUS AREA: {future_focus}
 
-Provide comprehensive gap analysis in JSON format:
+BRAINSTORMING INSTRUCTIONS:
+- Be thorough and creative in identifying POTENTIAL gaps
+- This is a brainstorming phase - include anything that MIGHT be a gap or limitation
+- Think about what's missing, unexplored, or inadequately addressed
+- Consider methodological, theoretical, practical, and empirical gaps
+- Don't worry about false positives at this stage
+
+For each potential gap, think through:
+1. What is missing or inadequately addressed?
+2. Why might this be important?
+3. What evidence suggests this is a gap?
+
+Provide your brainstorming in JSON format:
+{{
+  "potential_gaps": [
+    {{
+      "gap_type": "methodological | theoretical | empirical | practical | conceptual",
+      "initial_assessment": "What MIGHT be missing or inadequately addressed",
+      "evidence": "Why you think this might be a gap",
+      "potential_significance": "Why this could be important if it's a real gap",
+      "reasoning": "Your chain-of-thought reasoning"
+    }}
+  ],
+  "potential_future_directions": [
+    {{
+      "direction": "Potential research direction",
+      "rationale": "Why this might be worth pursuing",
+      "reasoning": "Your chain-of-thought"
+    }}
+  ]
+}}
+
+GAP CATEGORIES TO CONSIDER:
+1. Methodological: Missing methods, inadequate controls, sample limitations, measurement issues
+2. Theoretical: Unexplored frameworks, missing constructs, theoretical underdevelopment
+3. Empirical: Untested hypotheses, unexplored populations, missing variables, generalizability limits
+4. Practical: Real-world applications not explored, implementation challenges unaddressed
+5. Conceptual: Undefined terms, ambiguous concepts, inconsistent definitions
+
+Be comprehensive - we'll verify these in the next step.
+"""
+
+            # Step 1: Creative brainstorming with temperature=0.3
+            brainstorm_response = self._get_openai_client().generate_completion(
+                prompt=brainstorm_prompt,
+                model="gpt-3.5-turbo",
+                max_tokens=2000,
+                temperature=0.3  # Some creativity for brainstorming
+            )
+
+            if not brainstorm_response:
+                return {"error": "No response from Step 1 (brainstorming)"}
+
+            try:
+                brainstormed = json.loads(brainstorm_response)
+                potential_gaps = brainstormed.get("potential_gaps", [])
+                potential_directions = brainstormed.get("potential_future_directions", [])
+                logger.info(f"Step 1 complete: {len(potential_gaps)} potential gaps, {len(potential_directions)} potential directions identified")
+            except json.JSONDecodeError:
+                logger.error("Failed to parse brainstorming response")
+                return {"error": "Failed to parse brainstorming results"}
+
+            # STEP 2: Verify and evaluate each potential gap (deterministic)
+            logger.info("Step 2: Verifying and evaluating potential gaps...")
+            verification_prompt = f"""
+You are a rigorous research evaluator. You will now VERIFY and EVALUATE each potential research gap identified in the brainstorming phase.
+
+PAPER CONTENT:
+{text_content[:6000]}
+
+POTENTIAL GAPS TO VERIFY:
+{json.dumps(potential_gaps, indent=2)}
+
+POTENTIAL FUTURE DIRECTIONS TO EVALUATE:
+{json.dumps(potential_directions, indent=2)}
+
+VERIFICATION INSTRUCTIONS:
+For each potential gap, you must:
+1. Carefully examine whether it's truly a gap or already addressed in the paper
+2. Determine if it's a REAL gap or a false positive
+3. If it's a real gap, assess its significance and impact
+4. Provide clear justification for your decision
+
+Use chain-of-thought reasoning:
+- ANALYZE: Is this actually missing from the paper?
+- EVALUATE: If missing, is it a significant gap or minor limitation?
+- ASSESS: What's the potential impact of addressing this gap?
+- PRIORITIZE: How important is this gap relative to others?
+- CONCLUDE: Should this be included as a confirmed research gap?
+
+Provide your verification in JSON format:
 {{
   "research_gaps": [
     {{
-      "gap_type": "Type of gap",
-      "description": "Description of the gap",
-      "significance": "Why this gap is important",
-      "evidence": "Evidence supporting this gap"
+      "gap_type": "methodological | theoretical | empirical | practical",
+      "description": "Clear description of the confirmed gap",
+      "significance": "Why this gap is important and impactful",
+      "evidence": "Evidence from the paper showing this is missing",
+      "verification_reasoning": "Your chain-of-thought for why this IS a real gap"
+    }}
+  ],
+  "rejected_gaps": [
+    {{
+      "gap_type": "type from potential list",
+      "rejection_reasoning": "Why this is NOT a real gap after verification"
     }}
   ],
   "future_directions": [
     {{
-      "direction": "Future research direction",
-      "rationale": "Why this direction is important",
-      "feasibility": "How feasible is this direction?",
-      "priority": "High/Medium/Low priority"
+      "direction": "Confirmed future research direction",
+      "rationale": "Why this direction is important and feasible",
+      "priority": "High | Medium | Low",
+      "feasibility": "Assessment of how feasible this is"
     }}
   ],
   "limitations": [
     {{
-      "limitation": "Study limitation",
+      "limitation": "Confirmed study limitation",
       "impact": "How this affects the findings",
       "addressed": "How this could be addressed in future research"
     }}
   ],
   "unaddressed_questions": [
     {{
-      "question": "Unaddressed research question",
-      "importance": "Why this question is important",
-      "research_approach": "How this could be addressed"
+      "question": "Specific unaddressed research question",
+      "importance": "Why this question matters",
+      "research_approach": "How this could be investigated"
     }}
   ],
   "methodological_gaps": [
     {{
-      "gap": "Methodological gap",
-      "description": "Description of the methodological limitation",
+      "gap": "Specific methodological gap",
+      "description": "What's missing methodologically",
       "improvement": "How methodology could be improved"
     }}
   ],
   "theoretical_gaps": [
     {{
-      "gap": "Theoretical gap",
-      "description": "Description of the theoretical limitation",
+      "gap": "Specific theoretical gap",
+      "description": "What's missing theoretically",
       "development": "How theory could be developed"
     }}
   ],
-  "research_priorities": [
-    "Priority 1",
-    "Priority 2"
-  ],
-  "collaboration_opportunities": [
-    "Collaboration opportunity 1",
-    "Collaboration opportunity 2"
-  ],
-  "funding_considerations": [
-    "Funding consideration 1",
-    "Funding consideration 2"
-  ]
+  "research_priorities": ["Top priority research needs based on verified gaps"],
+  "collaboration_opportunities": ["Potential collaboration areas based on gaps"],
+  "funding_considerations": ["Funding opportunities related to addressing gaps"]
 }}
 
-Focus on identifying specific, actionable gaps and future directions that could advance the field.
+VERIFICATION STANDARDS:
+- Only include gaps that are genuinely missing or inadequately addressed
+- Be conservative - distinguish between minor limitations and significant gaps
+- Provide specific evidence from the paper
+- Assess the real-world significance of each gap
+- Different papers should yield different numbers and types of gaps based on actual content
 
-IMPORTANT: Analyze the paper thoroughly and provide different results for different papers. 
-- Count actual research gaps found (not a fixed number)
-- Identify real limitations and gaps based on content analysis
-- Provide varied recommendations based on the specific paper content
-- Ensure different papers get different gap counts and types
+IMPORTANT: The number of gaps should vary based on the paper's actual completeness:
+- Comprehensive papers may have 0-2 major gaps
+- Average papers may have 3-5 gaps
+- Papers with significant limitations may have 6+ gaps
+- Base this on ACTUAL analysis, not arbitrary numbers
 """
-            
-            llm_response = self._get_openai_client().generate_completion(
-                prompt=prompt,
+
+            # Step 2: Deterministic verification with temperature=0.0
+            verification_response = self._get_openai_client().generate_completion(
+                prompt=verification_prompt,
                 model="gpt-3.5-turbo",
-                max_tokens=2000
+                max_tokens=2500,
+                temperature=0.0  # Deterministic for consistency
             )
-            
-            if llm_response:
+
+            if verification_response:
                 try:
-                    return json.loads(llm_response)
+                    result = json.loads(verification_response)
+                    logger.info(f"Step 2 complete: {len(result.get('research_gaps', []))} gaps confirmed, {len(result.get('rejected_gaps', []))} rejected")
+                    return result
                 except json.JSONDecodeError:
+                    logger.error("Failed to parse verification response")
                     # Fallback if JSON parsing fails
                     return {
                         "research_gaps": [],
+                        "rejected_gaps": [],
                         "future_directions": [],
                         "limitations": [],
                         "unaddressed_questions": [],
                         "methodological_gaps": [],
-                        "theoretical_gaps": []
+                        "theoretical_gaps": [],
+                        "research_priorities": [],
+                        "collaboration_opportunities": [],
+                        "funding_considerations": []
                     }
             else:
-                return {"error": "No response from LLM"}
-                
+                return {"error": "No response from Step 2 (verification)"}
+
         except Exception as e:
             logger.error(f"Research gap identification analysis failed: {str(e)}")
             return {"error": str(e)}

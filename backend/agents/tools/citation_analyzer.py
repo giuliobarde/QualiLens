@@ -185,7 +185,8 @@ Provide the most comprehensive bibliometric analysis possible.
             llm_response = self._get_openai_client().generate_completion(
                 prompt=prompt,
                 model="gpt-3.5-turbo",
-                max_tokens=2000
+                max_tokens=2000,
+                temperature=0.0  # Deterministic for consistency
             )
             
             if llm_response:

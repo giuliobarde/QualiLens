@@ -7,6 +7,7 @@ sample characteristics, and methodological quality assessment.
 
 import logging
 import json
+import hashlib
 from typing import Dict, Any, Optional, List
 from .base_tool import BaseTool, ToolMetadata
 
@@ -17,6 +18,10 @@ sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(
 
 from LLM.openai_client import OpenAIClient
 
+# Import score cache
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+from score_cache import ScoreCache
+
 logger = logging.getLogger(__name__)
 
 
@@ -24,10 +29,11 @@ class MethodologyAnalyzerTool(BaseTool):
     """
     Methodology Analyzer tool for comprehensive analysis of research methodology.
     """
-    
+
     def __init__(self):
         super().__init__()
         self.openai_client = None
+        self.score_cache = ScoreCache()
     
     def _get_openai_client(self):
         """Get OpenAI client, initializing it lazily if needed."""
@@ -123,22 +129,48 @@ class MethodologyAnalyzerTool(BaseTool):
     def _analyze_comprehensive_methodology(self, text_content: str, focus_areas: Optional[List[str]]) -> Dict[str, Any]:
         """Analyze comprehensive methodology elements with field-specific standards, quantitative scoring, and cross-tool integration."""
         try:
+            # Check cache first for consistent scoring
+            cached_result = self.score_cache.get_cached_score(text_content)
+            if cached_result:
+                logger.info("✅ Using cached score for consistency")
+                # Reconstruct full result from cache
+                return {
+                    "field_detection": {"primary_field": cached_result.get("field_detected", "unknown")},
+                    "quantitative_scores": cached_result.get("score_breakdown", {}),
+                    "overall_quality_score": cached_result.get("overall_score", 0),
+                    "cached": True,
+                    "cache_timestamp": cached_result.get("cache_timestamp"),
+                    "content_hash": cached_result.get("content_hash"),
+                    "study_design": "Cached analysis",
+                    "sample_characteristics": {},
+                    "data_collection": {},
+                    "analysis_methods": {},
+                    "validity_measures": {},
+                    "ethical_considerations": {},
+                    "methodological_strengths": ["Score retrieved from cache for consistency"],
+                    "methodological_weaknesses": [],
+                    "quality_rating": self._determine_quality_level(cached_result.get("overall_score", 0))
+                }
+
+            # Cache miss - perform full analysis
+            logger.info("Cache miss - performing full analysis")
+
             # Step 1: Detect research field for field-specific analysis
             field_detection = self._detect_research_field(text_content)
             logger.info(f"Detected research field: {field_detection.get('primary_field', 'unknown')}")
-            
+
             # Step 2: Get field-specific standards and criteria
             field_standards = self._get_field_specific_standards(field_detection.get('primary_field', 'general'))
-            
+
             # Step 3: Generate comprehensive analysis with field-specific prompts
             methodology_analysis = self._generate_field_specific_analysis(text_content, focus_areas, field_standards)
-            
+
             # Step 4: Add quantitative scoring and risk assessment
             quantitative_scores = self._calculate_quantitative_scores(methodology_analysis, field_standards)
-            
+
             # Step 5: Cross-tool validation and consistency checking
             cross_validation = self._perform_cross_tool_validation(text_content, methodology_analysis)
-            
+
             # Step 6: Integrate all results
             comprehensive_result = {
                 **methodology_analysis,
@@ -147,11 +179,22 @@ class MethodologyAnalyzerTool(BaseTool):
                 "cross_validation": cross_validation,
                 "overall_quality_score": quantitative_scores.get("scores", {}).get("overall_score", 0),
                 "risk_assessment": quantitative_scores.get("risk_assessment", {}),
-                "field_specific_standards": field_standards
+                "field_specific_standards": field_standards,
+                "cached": False
             }
-            
+
+            # Cache the score for future consistency
+            content_hash = hashlib.sha256(text_content.encode('utf-8')).hexdigest()
+            cache_data = {
+                "overall_score": comprehensive_result.get("overall_quality_score", 0),
+                "score_breakdown": quantitative_scores,
+                "field_detected": field_detection.get("primary_field", "unknown")
+            }
+            self.score_cache.cache_score(text_content, cache_data)
+            comprehensive_result["content_hash"] = content_hash
+
             return comprehensive_result
-                
+
         except Exception as e:
             logger.error(f"Comprehensive methodology analysis failed: {str(e)}")
             return {"error": str(e)}
@@ -181,7 +224,8 @@ Focus on identifying the most relevant field for applying appropriate methodolog
             llm_response = self._get_openai_client().generate_completion(
                 prompt=prompt,
                 model="gpt-3.5-turbo",
-                max_tokens=800
+                max_tokens=800,
+                temperature=0.0  # Deterministic for consistency
             )
             
             if llm_response:
@@ -326,7 +370,8 @@ Provide the most comprehensive analysis possible using {checklist} standards.
             llm_response = self._get_openai_client().generate_completion(
                 prompt=prompt,
                 model="gpt-3.5-turbo",
-                max_tokens=3000
+                max_tokens=3000,
+                temperature=0.0  # Deterministic for consistency
             )
             
             if llm_response:
@@ -836,7 +881,8 @@ Consider field-specific standards and provide varied, realistic scores based on 
             llm_response = self._get_openai_client().generate_completion(
                 prompt=prompt,
                 model="gpt-3.5-turbo",
-                max_tokens=500
+                max_tokens=500,
+                temperature=0.0  # Deterministic for consistency
             )
             
             if llm_response:
@@ -853,138 +899,146 @@ Consider field-specific standards and provide varied, realistic scores based on 
             return {}
     
     def _calculate_content_variation(self, methodology_analysis: Dict[str, Any]) -> float:
-        """Calculate content-based variation to ensure different papers get different scores."""
+        """Calculate content-based variation to ensure different papers get different scores (DETERMINISTIC)."""
         try:
-            # Create a content hash for variation
-            content_text = str(methodology_analysis)
-            content_hash = hash(content_text) % 1000  # 0-999
-            
+            # Create a STABLE content hash for variation using SHA256
+            content_text = str(sorted(methodology_analysis.items()))  # Sort for consistency
+            content_hash_hex = hashlib.sha256(content_text.encode('utf-8')).hexdigest()
+            content_hash = int(content_hash_hex[:8], 16) % 1000  # 0-999, deterministic
+
             # Convert to variation between -5 and +5
             variation = (content_hash / 1000.0 - 0.5) * 10
-            
+
             # Add some randomness based on content characteristics
             content_length = len(content_text)
             if content_length > 2000:
                 variation += 2.0
             elif content_length < 500:
                 variation -= 3.0
-            
+
             # Add variation based on number of sections
             sections_count = len([k for k in methodology_analysis.keys() if isinstance(methodology_analysis[k], dict)])
             if sections_count > 4:
                 variation += 1.5
             elif sections_count < 2:
                 variation -= 2.0
-            
+
             return round(variation, 1)
-            
+
         except Exception as e:
             logger.error(f"Content variation calculation failed: {str(e)}")
             return 0.0
     
     def _calculate_guaranteed_variation(self, methodology_analysis: Dict[str, Any]) -> float:
-        """Calculate guaranteed variation to ensure different papers get different scores."""
+        """Calculate guaranteed variation to ensure different papers get different scores (DETERMINISTIC)."""
         try:
-            # Create a more robust content hash
-            content_text = str(methodology_analysis)
-            content_hash = hash(content_text) % 10000  # 0-9999 for more variation
-            
+            # Create a STABLE and robust content hash using SHA256
+            content_text = str(sorted(methodology_analysis.items()))  # Sort for consistency
+            content_hash_hex = hashlib.sha256(content_text.encode('utf-8')).hexdigest()
+            content_hash = int(content_hash_hex[:8], 16) % 10000  # 0-9999, deterministic
+
             # Convert to variation between -10 and +10
             variation = (content_hash / 10000.0 - 0.5) * 20
-            
+
             # Add variation based on content characteristics
             content_length = len(content_text)
             if content_length > 3000:
                 variation += 3.0
             elif content_length < 1000:
                 variation -= 4.0
-            
+
             # Add variation based on number of sections
             sections_count = len([k for k in methodology_analysis.keys() if isinstance(methodology_analysis[k], dict)])
             if sections_count > 5:
                 variation += 2.0
             elif sections_count < 3:
                 variation -= 3.0
-            
+
             # Add variation based on content complexity
             complexity_indicators = ["randomized", "controlled", "double-blind", "placebo", "crossover", "longitudinal"]
             complexity_count = sum(1 for indicator in complexity_indicators if indicator in content_text.lower())
             variation += complexity_count * 0.5
-            
+
             return round(variation, 1)
-            
+
         except Exception as e:
             logger.error(f"Guaranteed variation calculation failed: {str(e)}")
             return 0.0
     
     def _score_study_design_with_variation(self, study_design: Dict[str, Any], field_standards: Dict[str, Any]) -> float:
-        """Score study design with guaranteed variation."""
+        """Score study design with guaranteed variation (DETERMINISTIC)."""
         base_score = self._score_study_design(study_design, field_standards)
-        
-        # Add guaranteed variation
-        content_text = str(study_design)
-        content_hash = hash(content_text) % 1000
+
+        # Add guaranteed variation using STABLE hash
+        content_text = str(sorted(study_design.items()))  # Sort for consistency
+        content_hash_hex = hashlib.sha256(content_text.encode('utf-8')).hexdigest()
+        content_hash = int(content_hash_hex[:8], 16) % 1000
         variation = (content_hash / 1000.0 - 0.5) * 15  # -7.5 to +7.5
-        
+
         final_score = min(100.0, max(0.0, base_score + variation))
         return round(final_score, 1)
     
     def _score_sample_characteristics_with_variation(self, sample_characteristics: Dict[str, Any], field_standards: Dict[str, Any]) -> float:
-        """Score sample characteristics with guaranteed variation."""
+        """Score sample characteristics with guaranteed variation (DETERMINISTIC)."""
         base_score = self._score_sample_characteristics(sample_characteristics, field_standards)
-        
-        # Add guaranteed variation
-        content_text = str(sample_characteristics)
-        content_hash = hash(content_text) % 1000
+
+        # Add guaranteed variation using STABLE hash
+        content_text = str(sorted(sample_characteristics.items()))  # Sort for consistency
+        content_hash_hex = hashlib.sha256(content_text.encode('utf-8')).hexdigest()
+        content_hash = int(content_hash_hex[:8], 16) % 1000
         variation = (content_hash / 1000.0 - 0.5) * 12  # -6 to +6
-        
+
         final_score = min(100.0, max(0.0, base_score + variation))
         return round(final_score, 1)
     
     def _score_data_collection_with_variation(self, data_collection: Dict[str, Any], field_standards: Dict[str, Any]) -> float:
-        """Score data collection with guaranteed variation."""
+        """Score data collection with guaranteed variation (DETERMINISTIC)."""
         base_score = self._score_data_collection(data_collection, field_standards)
-        
-        # Add guaranteed variation
-        content_text = str(data_collection)
-        content_hash = hash(content_text) % 1000
+
+        # Add guaranteed variation using STABLE hash
+        content_text = str(sorted(data_collection.items()))  # Sort for consistency
+        content_hash_hex = hashlib.sha256(content_text.encode('utf-8')).hexdigest()
+        content_hash = int(content_hash_hex[:8], 16) % 1000
         variation = (content_hash / 1000.0 - 0.5) * 10  # -5 to +5
-        
+
         final_score = min(100.0, max(0.0, base_score + variation))
         return round(final_score, 1)
-    
+
     def _score_analysis_methods_with_variation(self, analysis_methods: Dict[str, Any], field_standards: Dict[str, Any]) -> float:
-        """Score analysis methods with guaranteed variation."""
+        """Score analysis methods with guaranteed variation (DETERMINISTIC)."""
         base_score = self._score_analysis_methods(analysis_methods, field_standards)
-        
-        # Add guaranteed variation
-        content_text = str(analysis_methods)
-        content_hash = hash(content_text) % 1000
+
+        # Add guaranteed variation using STABLE hash
+        content_text = str(sorted(analysis_methods.items()))  # Sort for consistency
+        content_hash_hex = hashlib.sha256(content_text.encode('utf-8')).hexdigest()
+        content_hash = int(content_hash_hex[:8], 16) % 1000
         variation = (content_hash / 1000.0 - 0.5) * 8  # -4 to +4
-        
+
         final_score = min(100.0, max(0.0, base_score + variation))
         return round(final_score, 1)
-    
+
     def _score_validity_measures_with_variation(self, validity_measures: Dict[str, Any], field_standards: Dict[str, Any]) -> float:
-        """Score validity measures with guaranteed variation."""
+        """Score validity measures with guaranteed variation (DETERMINISTIC)."""
         base_score = self._score_validity_measures(validity_measures, field_standards)
-        
-        # Add guaranteed variation
-        content_text = str(validity_measures)
-        content_hash = hash(content_text) % 1000
+
+        # Add guaranteed variation using STABLE hash
+        content_text = str(sorted(validity_measures.items()))  # Sort for consistency
+        content_hash_hex = hashlib.sha256(content_text.encode('utf-8')).hexdigest()
+        content_hash = int(content_hash_hex[:8], 16) % 1000
         variation = (content_hash / 1000.0 - 0.5) * 6  # -3 to +3
-        
+
         final_score = min(100.0, max(0.0, base_score + variation))
         return round(final_score, 1)
-    
+
     def _score_ethical_considerations_with_variation(self, ethical_considerations: Dict[str, Any], field_standards: Dict[str, Any]) -> float:
-        """Score ethical considerations with guaranteed variation."""
+        """Score ethical considerations with guaranteed variation (DETERMINISTIC)."""
         base_score = self._score_ethical_considerations(ethical_considerations, field_standards)
-        
-        # Add guaranteed variation
-        content_text = str(ethical_considerations)
-        content_hash = hash(content_text) % 1000
+
+        # Add guaranteed variation using STABLE hash
+        content_text = str(sorted(ethical_considerations.items()))  # Sort for consistency
+        content_hash_hex = hashlib.sha256(content_text.encode('utf-8')).hexdigest()
+        content_hash = int(content_hash_hex[:8], 16) % 1000
         variation = (content_hash / 1000.0 - 0.5) * 4  # -2 to +2
-        
+
         final_score = min(100.0, max(0.0, base_score + variation))
         return round(final_score, 1)

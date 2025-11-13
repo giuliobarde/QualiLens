@@ -38,15 +38,16 @@ class OpenAIClient:
         self.chat_model = ChatOpenAI(openai_api_key=self.api_key)
         logger.info("OpenAI client initialized successfully with LangChain")
     
-    def generate_completion(self, prompt: str, model: str = "gpt-3.5-turbo", max_tokens: int = 1000) -> Optional[str]:
+    def generate_completion(self, prompt: str, model: str = "gpt-3.5-turbo", max_tokens: int = 1000, temperature: float = 0.0) -> Optional[str]:
         """
         Generate text completion using OpenAI models.
-        
+
         Args:
             prompt (str): Input prompt
             model (str): OpenAI model to use
             max_tokens (int): Maximum tokens to generate
-            
+            temperature (float): Sampling temperature (0.0 = deterministic, 1.0 = creative). Default 0.0 for consistency.
+
         Returns:
             Optional[str]: Generated text or None if failed
         """
@@ -55,16 +56,17 @@ class OpenAIClient:
             chat_model = ChatOpenAI(
                 openai_api_key=self.api_key,
                 model=model,
-                max_tokens=max_tokens
+                max_tokens=max_tokens,
+                temperature=temperature  # Add temperature for deterministic scoring
             )
-            
+
             messages = [HumanMessage(content=prompt)]
             response = chat_model.invoke(messages)
-            
+
             completion = response.content
-            logger.info(f"Generated completion using model: {model}")
+            logger.info(f"Generated completion using model: {model} (temperature={temperature})")
             return completion
-            
+
         except Exception as e:
             logger.error(f"Failed to generate completion: {str(e)}")
             return None

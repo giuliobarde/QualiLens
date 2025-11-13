@@ -113,85 +113,169 @@ class BiasDetectionTool(BaseTool):
             }
     
     def _detect_biases(self, text_content: str, bias_types: List[str], severity_threshold: str) -> Dict[str, Any]:
-        """Detect various types of biases in the research paper."""
+        """
+        Detect various types of biases in the research paper using two-step chain-of-thought reasoning.
+
+        Step 1: Brainstorm potential biases (creative, temperature > 0)
+        Step 2: Verify and analyze each potential bias (deterministic, temperature = 0)
+        """
         try:
-            prompt = f"""
-You are an expert research analyst specializing in bias detection and quality assessment. 
-Analyze this research paper for potential biases and limitations.
+            # STEP 1: Brainstorm potential biases (more creative)
+            logger.info("Step 1: Brainstorming potential biases...")
+            brainstorm_prompt = f"""
+You are an expert research methodologist specializing in bias detection. Your task is to BRAINSTORM potential biases in this research paper.
 
 PAPER CONTENT:
 {text_content[:6000]}
 
-BIAS TYPES TO ANALYZE: {', '.join(bias_types)}
-SEVERITY THRESHOLD: {severity_threshold}
+BIAS TYPES TO CONSIDER: {', '.join(bias_types)}
 
-Please analyze the paper for potential biases and provide a comprehensive assessment in JSON format:
+BRAINSTORMING INSTRUCTIONS:
+- Be thorough and creative in identifying POTENTIAL biases
+- This is a brainstorming phase - include anything that MIGHT be a bias
+- Provide your reasoning for why each item might be a bias
+- Include edge cases and subtle biases
+- Don't worry about false positives at this stage
+
+For each potential bias, think through:
+1. What aspect of the study suggests this bias?
+2. What is the specific evidence?
+3. How would this bias affect the results if it exists?
+
+Provide your brainstorming in JSON format:
 {{
-  "detected_biases": [
+  "potential_biases": [
     {{
-      "bias_type": "selection_bias",
-      "description": "Description of the bias found",
-      "evidence": "Specific evidence from the paper",
-      "severity": "low/medium/high",
-      "impact": "How this bias affects the results"
+      "bias_type": "selection_bias | measurement_bias | confounding_bias | publication_bias | reporting_bias",
+      "initial_assessment": "Why you think this MIGHT be a bias",
+      "evidence_snippet": "Specific quote or aspect from the paper",
+      "potential_severity": "low | medium | high",
+      "reasoning": "Your chain-of-thought reasoning"
     }}
-  ],
-  "bias_summary": "Overall summary of bias assessment",
-  "limitations": [
-    "Limitation 1",
-    "Limitation 2"
-  ],
-  "confounding_factors": [
-    "Confounding factor 1",
-    "Confounding factor 2"
-  ],
-  "severity_scores": {{
-    "selection_bias": "low/medium/high",
-    "measurement_bias": "low/medium/high",
-    "confounding_bias": "low/medium/high",
-    "publication_bias": "low/medium/high",
-    "reporting_bias": "low/medium/high"
-  }},
-  "recommendations": [
-    "Recommendation 1",
-    "Recommendation 2"
   ]
 }}
 
 BIAS DETECTION GUIDELINES:
-1. Selection Bias: Look for non-random sampling, exclusion criteria, recruitment methods
-2. Measurement Bias: Check for measurement errors, instrument bias, observer bias
-3. Confounding Bias: Identify uncontrolled variables that could affect results
-4. Publication Bias: Look for selective reporting, missing negative results
-5. Reporting Bias: Check for incomplete reporting, selective outcome reporting
+1. Selection Bias: Non-random sampling, exclusion criteria, recruitment methods, sample representativeness
+2. Measurement Bias: Measurement errors, instrument bias, observer bias, recall bias, social desirability
+3. Confounding Bias: Uncontrolled variables, lack of randomization, missing covariates
+4. Publication Bias: Selective reporting, missing negative results, outcome switching
+5. Reporting Bias: Incomplete reporting, selective outcome reporting, data dredging
 
-Focus on identifying specific evidence of biases and their potential impact on the study's validity.
-Only report biases that meet or exceed the severity threshold.
+Be comprehensive - we'll verify these in the next step.
 """
-            
-            llm_response = self._get_openai_client().generate_completion(
-                prompt=prompt,
+
+            # Step 1: Creative brainstorming with temperature=0.3
+            brainstorm_response = self._get_openai_client().generate_completion(
+                prompt=brainstorm_prompt,
                 model="gpt-3.5-turbo",
-                max_tokens=2000
+                max_tokens=2000,
+                temperature=0.3  # Some creativity for brainstorming
             )
-            
-            if llm_response:
+
+            if not brainstorm_response:
+                return {"error": "No response from Step 1 (brainstorming)"}
+
+            try:
+                brainstormed = json.loads(brainstorm_response)
+                potential_biases = brainstormed.get("potential_biases", [])
+                logger.info(f"Step 1 complete: {len(potential_biases)} potential biases identified")
+            except json.JSONDecodeError:
+                logger.error("Failed to parse brainstorming response")
+                return {"error": "Failed to parse brainstorming results"}
+
+            # STEP 2: Verify and analyze each potential bias (deterministic)
+            logger.info("Step 2: Verifying and analyzing potential biases...")
+            verification_prompt = f"""
+You are a rigorous research quality assessor. You will now VERIFY each potential bias identified in the brainstorming phase.
+
+PAPER CONTENT:
+{text_content[:6000]}
+
+POTENTIAL BIASES TO VERIFY:
+{json.dumps(potential_biases, indent=2)}
+
+SEVERITY THRESHOLD: {severity_threshold}
+
+VERIFICATION INSTRUCTIONS:
+For each potential bias, you must:
+1. Carefully examine the evidence
+2. Determine if it is a TRUE bias or a false positive
+3. If it's a true bias, assess its severity and impact
+4. Provide clear justification for your decision
+
+Use chain-of-thought reasoning:
+- ANALYZE: What does the evidence actually show?
+- EVALUATE: Is this a genuine bias or a limitation?
+- ASSESS: If it's a bias, how severe is it?
+- CONCLUDE: Should this be included in the final list?
+
+Provide your verification in JSON format:
+{{
+  "detected_biases": [
+    {{
+      "bias_type": "type from potential list",
+      "description": "Clear description of the confirmed bias",
+      "evidence": "Specific evidence from the paper",
+      "severity": "low | medium | high",
+      "impact": "How this bias affects the study's validity and results",
+      "verification_reasoning": "Your chain-of-thought for why this IS a genuine bias"
+    }}
+  ],
+  "rejected_biases": [
+    {{
+      "bias_type": "type from potential list",
+      "rejection_reasoning": "Why this is NOT a genuine bias after verification"
+    }}
+  ],
+  "bias_summary": "Overall summary of confirmed biases",
+  "limitations": ["Study limitations that are not biases"],
+  "confounding_factors": ["Uncontrolled variables that could affect results"],
+  "severity_scores": {{
+    "selection_bias": "none | low | medium | high",
+    "measurement_bias": "none | low | medium | high",
+    "confounding_bias": "none | low | medium | high",
+    "publication_bias": "none | low | medium | high",
+    "reporting_bias": "none | low | medium | high"
+  }},
+  "recommendations": ["Recommendations to address the confirmed biases"]
+}}
+
+VERIFICATION STANDARDS:
+- Only include biases that meet or exceed the severity threshold: {severity_threshold}
+- Be conservative - when in doubt, explain why in rejected_biases
+- Provide specific evidence, not speculation
+- Distinguish between biases and general limitations
+"""
+
+            # Step 2: Deterministic verification with temperature=0.0
+            verification_response = self._get_openai_client().generate_completion(
+                prompt=verification_prompt,
+                model="gpt-3.5-turbo",
+                max_tokens=2500,
+                temperature=0.0  # Deterministic for consistency
+            )
+
+            if verification_response:
                 try:
-                    result = json.loads(llm_response)
+                    result = json.loads(verification_response)
+                    logger.info(f"Step 2 complete: {len(result.get('detected_biases', []))} biases confirmed, {len(result.get('rejected_biases', []))} rejected")
                     return result
                 except json.JSONDecodeError:
+                    logger.error("Failed to parse verification response")
                     # Fallback if JSON parsing fails
                     return {
                         "detected_biases": [],
-                        "bias_summary": llm_response,
+                        "rejected_biases": [],
+                        "bias_summary": verification_response,
                         "limitations": [],
                         "confounding_factors": [],
                         "severity_scores": {},
                         "recommendations": []
                     }
             else:
-                return {"error": "No response from LLM"}
-                
+                return {"error": "No response from Step 2 (verification)"}
+
         except Exception as e:
             logger.error(f"Bias detection analysis failed: {str(e)}")
             return {"error": str(e)}

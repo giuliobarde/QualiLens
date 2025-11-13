@@ -384,30 +384,37 @@ export default function ScrollableAnalysisSections({ data, className = '' }: Scr
 
   return (
     <div className={`flex flex-col h-full ${className}`}>
-      {/* Section Navigation */}
-      <div className="border-b border-gray-200 p-4">
-        <h3 className="text-lg font-semibold text-gray-800 mb-3">Analysis Sections</h3>
+      {/* Enhanced Section Navigation */}
+      <div className="bg-gradient-to-r from-gray-50 to-gray-100 border-b border-gray-200 p-4">
+        <h3 className="text-lg font-semibold text-gray-800 mb-4 flex items-center">
+          <svg className="w-5 h-5 mr-2 text-gray-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2" />
+          </svg>
+          Analysis Sections
+        </h3>
         <div className="grid grid-cols-2 gap-2">
           {sections.map((section) => (
             <button
               key={section.id}
               onClick={() => setActiveSection(section.id)}
-              className={`p-2 rounded-lg text-xs font-medium transition-colors border ${
+              className={`p-3 rounded-xl text-xs font-semibold transition-all border-2 transform hover:scale-105 ${
                 activeSection === section.id 
-                  ? getColorClasses(section.color, true)
-                  : getColorClasses(section.color, false)
+                  ? getColorClasses(section.color, true) + ' shadow-md scale-105'
+                  : getColorClasses(section.color, false) + ' border-transparent hover:border-gray-300'
               }`}
             >
-              <span className="mr-1">{section.icon}</span>
+              <span className="mr-1.5 text-base">{section.icon}</span>
               {section.label}
             </button>
           ))}
         </div>
       </div>
       
-      {/* Section Content */}
-      <div className="flex-1 overflow-y-auto p-4">
-        {renderSectionContent()}
+      {/* Enhanced Section Content */}
+      <div className="flex-1 overflow-y-auto p-6 analysis-scroll">
+        <div className="animate-fade-in">
+          {renderSectionContent()}
+        </div>
       </div>
     </div>
   );

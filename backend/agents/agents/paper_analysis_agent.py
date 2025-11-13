@@ -7,11 +7,17 @@ and quality assessment.
 """
 
 import logging
+import sys
+import os
 from typing import Dict, Any, List, Optional
 from datetime import datetime
 
 from .base_agent import BaseAgent, AgentResponse
 from ..question_classifier import ClassificationResult, QueryType
+
+# Import enhanced scorer
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+from enhanced_scorer import EnhancedScorer
 
 logger = logging.getLogger(__name__)
 
@@ -345,12 +351,22 @@ class PaperAnalysisAgent(BaseAgent):
                 logger.info(f"   - methodology_data keys: {list(methodology_data.keys())}")
                 logger.info(f"   - overall_quality_score: {methodology_data.get('overall_quality_score')}")
                 logger.info(f"   - quantitative_scores: {methodology_data.get('quantitative_scores', {})}")
-                
+                logger.info(f"   - cached: {methodology_data.get('cached', False)}")
+                logger.info(f"   - content_hash: {methodology_data.get('content_hash', 'N/A')}")
+
                 integrated_result["study_design"] = methodology_data.get("study_design", "")
                 integrated_result["sample_characteristics"] = methodology_data.get("sample_characteristics", {})
                 integrated_result["methodological_strengths"] = methodology_data.get("methodological_strengths", [])
                 integrated_result["methodological_weaknesses"] = methodology_data.get("methodological_weaknesses", [])
                 integrated_result["methodology_quality_rating"] = methodology_data.get("quality_rating", "")
+
+                # Add cache metadata for transparency
+                integrated_result["scoring_metadata"] = {
+                    "cached": methodology_data.get("cached", False),
+                    "cache_timestamp": methodology_data.get("cache_timestamp"),
+                    "content_hash": methodology_data.get("content_hash")
+                }
+
                 # Add the overall quality score from methodology analysis
                 if methodology_data.get("overall_quality_score"):
                     integrated_result["overall_quality_score"] = methodology_data.get("overall_quality_score")
@@ -395,21 +411,54 @@ class PaperAnalysisAgent(BaseAgent):
             # Add quality assessment if available (but don't override methodology score)
             if "quality_assessment" in analysis_results:
                 quality_data = analysis_results["quality_assessment"]
-                
+
                 # Only use quality assessor score if no methodology score exists
                 if not integrated_result.get("overall_quality_score") or integrated_result.get("overall_quality_score") == 0:
                     integrated_result["overall_quality_score"] = quality_data.get("overall_quality_score", 0.0)
                     logger.info(f"⚠️ Using quality assessor score: {quality_data.get('overall_quality_score', 0.0)}")
                 else:
                     logger.info(f"✅ Keeping methodology analyzer score: {integrated_result.get('overall_quality_score')} (ignoring quality assessor: {quality_data.get('overall_quality_score', 0.0)})")
-                
+
                 integrated_result["quality_breakdown"] = quality_data.get("quality_breakdown", {})
                 integrated_result["quality_strengths"] = quality_data.get("strengths", [])
                 integrated_result["quality_weaknesses"] = quality_data.get("weaknesses", [])
                 integrated_result["quality_recommendations"] = quality_data.get("recommendations", [])
                 integrated_result["quality_confidence_level"] = quality_data.get("confidence_level", "")
                 integrated_result["scoring_criteria_used"] = quality_data.get("scoring_criteria_used", [])
-            
+
+            # PHASE 2: Apply Enhanced Scoring (reproducibility, bias, research gaps)
+            logger.info("🎯 Applying Phase 2 Enhanced Scoring")
+            base_score = integrated_result.get("overall_quality_score", 0.0)
+
+            if base_score > 0:
+                try:
+                    enhanced_scorer = EnhancedScorer()
+                    enhanced_result = enhanced_scorer.calculate_final_score(
+                        base_methodology_score=base_score,
+                        text_content=text_content,
+                        reproducibility_data=analysis_results.get("reproducibility_analysis"),
+                        bias_data=analysis_results.get("bias_analysis"),
+                        research_gaps_data=analysis_results.get("research_gap_analysis")
+                    )
+
+                    # Update with enhanced score (weighted component system)
+                    integrated_result["overall_quality_score"] = enhanced_result["final_score"]
+                    integrated_result["base_methodology_score"] = base_score
+                    integrated_result["component_scores"] = enhanced_result["component_scores"]
+                    integrated_result["weighted_contributions"] = enhanced_result["weighted_contributions"]
+                    integrated_result["scoring_weights"] = enhanced_result["weights"]
+
+                    logger.info(f"✅ Enhanced scoring applied (weighted components):")
+                    logger.info(f"   Methodology: {enhanced_result['component_scores']['methodology']} × 60% = {enhanced_result['weighted_contributions']['methodology']:.1f} pts")
+                    logger.info(f"   Bias: {enhanced_result['component_scores']['bias']} × 20% = {enhanced_result['weighted_contributions']['bias']:.1f} pts")
+                    logger.info(f"   Reproducibility: {enhanced_result['component_scores']['reproducibility']} × 10% = {enhanced_result['weighted_contributions']['reproducibility']:.1f} pts")
+                    logger.info(f"   Research Gaps: {enhanced_result['component_scores']['research_gaps']} × 10% = {enhanced_result['weighted_contributions']['research_gaps']:.1f} pts")
+                    logger.info(f"   FINAL SCORE: {enhanced_result['final_score']:.1f}/100")
+
+                except Exception as e:
+                    logger.error(f"Enhanced scoring failed: {str(e)}")
+                    logger.info("Continuing with base methodology score")
+
             # Generate overall assessment
             integrated_result["overall_assessment"] = self._generate_overall_assessment(analysis_results)
             
