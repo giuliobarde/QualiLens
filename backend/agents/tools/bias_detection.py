@@ -69,7 +69,7 @@ class BiasDetectionTool(BaseTool):
         )
     
     def execute(self, text_content: str, bias_types: Optional[List[str]] = None, 
-                severity_threshold: str = "low") -> Dict[str, Any]:
+                severity_threshold: str = "low", evidence_collector=None) -> Dict[str, Any]:
         """
         Detect potential biases and limitations in research papers.
         
@@ -90,6 +90,19 @@ class BiasDetectionTool(BaseTool):
             
             # Generate bias detection analysis
             bias_analysis = self._detect_biases(text_content, bias_types, severity_threshold)
+            
+            # Collect evidence if evidence_collector is provided
+            if evidence_collector:
+                detected_biases = bias_analysis.get("detected_biases", [])
+                for bias in detected_biases:
+                    evidence_collector.add_evidence(
+                        category="bias",
+                        text_snippet=bias.get("evidence", bias.get("description", "")),
+                        rationale=bias.get("verification_reasoning", bias.get("description", "")),
+                        severity=bias.get("severity", "medium"),
+                        confidence=0.8 if bias.get("severity") == "high" else 0.6,
+                        score_impact=-20.0 if bias.get("severity") == "high" else -10.0
+                    )
             
             return {
                 "success": True,

@@ -75,7 +75,7 @@ class MethodologyAnalyzerTool(BaseTool):
         )
     
     def execute(self, text_content: str, analysis_depth: str = "detailed", 
-                focus_areas: Optional[List[str]] = None) -> Dict[str, Any]:
+                focus_areas: Optional[List[str]] = None, evidence_collector=None) -> Dict[str, Any]:
         """
         Analyze research methodology comprehensively.
         
@@ -99,6 +99,33 @@ class MethodologyAnalyzerTool(BaseTool):
             logger.info(f"   - overall_quality_score: {overall_score}")
             logger.info(f"   - quantitative_scores: {methodology_result.get('quantitative_scores', {})}")
             logger.info(f"   - quality_rating: {methodology_result.get('quality_rating', '')}")
+            
+            # Collect evidence if evidence_collector is provided
+            if evidence_collector:
+                strengths = methodology_result.get("methodological_strengths", [])
+                weaknesses = methodology_result.get("methodological_weaknesses", [])
+                
+                # Add evidence for strengths
+                for strength in strengths[:3]:  # Top 3 strengths
+                    if strength and len(strength) > 20:
+                        evidence_collector.add_evidence(
+                            category="methodology",
+                            text_snippet=strength[:200],
+                            rationale=f"Methodological strength: {strength}",
+                            confidence=0.7,
+                            score_impact=5.0
+                        )
+                
+                # Add evidence for weaknesses
+                for weakness in weaknesses[:3]:  # Top 3 weaknesses
+                    if weakness and len(weakness) > 20:
+                        evidence_collector.add_evidence(
+                            category="methodology",
+                            text_snippet=weakness[:200],
+                            rationale=f"Methodological weakness: {weakness}",
+                            confidence=0.7,
+                            score_impact=-5.0
+                        )
             
             return {
                 "success": True,

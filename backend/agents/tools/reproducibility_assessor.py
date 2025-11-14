@@ -68,7 +68,7 @@ class ReproducibilityAssessorTool(BaseTool):
         )
     
     def execute(self, text_content: str, assessment_criteria: Optional[List[str]] = None,
-                reproducibility_level: str = "detailed") -> Dict[str, Any]:
+                reproducibility_level: str = "detailed", evidence_collector=None) -> Dict[str, Any]:
         """
         Assess study reproducibility.
         
@@ -88,6 +88,29 @@ class ReproducibilityAssessorTool(BaseTool):
                 assessment_result = self._assess_basic_reproducibility(text_content, assessment_criteria)
             else:  # detailed
                 assessment_result = self._assess_detailed_reproducibility(text_content, assessment_criteria)
+            
+            # Collect evidence if evidence_collector is provided
+            if evidence_collector:
+                barriers = assessment_result.get("reproducibility_barriers", [])
+                for barrier in barriers[:5]:  # Top 5 barriers
+                    if isinstance(barrier, dict):
+                        barrier_text = barrier.get("barrier", str(barrier))
+                        evidence_collector.add_evidence(
+                            category="reproducibility",
+                            text_snippet=barrier_text[:200],
+                            rationale=f"Reproducibility barrier: {barrier_text}",
+                            severity=barrier.get("severity", "medium"),
+                            confidence=0.7,
+                            score_impact=-10.0
+                        )
+                    elif isinstance(barrier, str) and len(barrier) > 20:
+                        evidence_collector.add_evidence(
+                            category="reproducibility",
+                            text_snippet=barrier[:200],
+                            rationale=f"Reproducibility barrier: {barrier}",
+                            confidence=0.7,
+                            score_impact=-10.0
+                        )
             
             return {
                 "success": True,

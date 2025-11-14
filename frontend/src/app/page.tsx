@@ -2,10 +2,18 @@
 
 import { useState, useRef, useEffect, useCallback } from 'react';
 import { agentService } from '@/utils/agent-service';
+import dynamic from 'next/dynamic';
 import QualityScoreDisplay from '@/components/QualityScoreDisplay';
 import ScrollableAnalysisSections from '@/components/ScrollableAnalysisSections';
 import EnhancedProgressBar from '@/components/EnhancedProgressBar';
 import CircularScoreDisplay from '@/components/CircularScoreDisplay';
+import EvidenceVisualization from '@/components/EvidenceVisualization';
+
+// Dynamically import PDF viewer to avoid SSR issues with PDF.js
+const PDFViewerWithHighlights = dynamic(
+  () => import('@/components/PDFViewerWithHighlights'),
+  { ssr: false }
+);
 
 export default function Home() {
   const [query, setQuery] = useState('');
@@ -18,6 +26,7 @@ export default function Home() {
   const [estimatedTime, setEstimatedTime] = useState<number | undefined>(undefined);
   const [isDragging, setIsDragging] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [selectedEvidenceId, setSelectedEvidenceId] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const dropZoneRef = useRef<HTMLDivElement>(null);
 
@@ -179,6 +188,12 @@ export default function Home() {
         console.log('- reproducibility:', response.result.reproducibility);
         console.log('- research_gaps:', response.result.research_gaps);
         console.log('- citations:', response.result.citations);
+        
+        // CRITICAL: Debug evidence traces
+        console.log('📊 EVIDENCE TRACES DEBUG:');
+        console.log('- evidence_traces:', response.result.evidence_traces);
+        console.log('- evidence_traces length:', response.result.evidence_traces?.length || 0);
+        console.log('- evidence_summary:', response.result.evidence_summary);
         
         // CRITICAL: Debug quality score data
         console.log('🎯 QUALITY SCORE DEBUG:');
@@ -563,10 +578,13 @@ export default function Home() {
                             </div>
                           </div>
                         ) : (
-                          <iframe
-                            src={pdfContent}
-                            className="w-full h-full border-0"
-                            title="PDF Viewer"
+                          <PDFViewerWithHighlights
+                            pdfUrl={pdfContent}
+                            evidenceTraces={analysisResult?.evidence_traces || []}
+                            selectedEvidenceId={selectedEvidenceId}
+                            onEvidenceClick={(evidence) => {
+                              setSelectedEvidenceId(evidence.id);
+                            }}
                           />
                         )}
                       </div>
@@ -588,6 +606,34 @@ export default function Home() {
                 </div>
               </div>
             </div>
+
+            {/* Evidence Visualization Section */}
+            {analysisResult?.evidence_traces && Array.isArray(analysisResult.evidence_traces) && analysisResult.evidence_traces.length > 0 ? (
+              <div className="mt-6">
+                <EvidenceVisualization
+                  evidenceTraces={analysisResult.evidence_traces}
+                  pdfContent={pdfContent}
+                  onEvidenceClick={(evidence) => {
+                    setSelectedEvidenceId(evidence.id);
+                    // Scroll to the page in PDF viewer
+                    if (evidence.page_number) {
+                      // The PDF viewer will handle scrolling
+                    }
+                  }}
+                />
+              </div>
+            ) : analysisResult && (
+              <div className="mt-6 bg-yellow-50 border border-yellow-200 rounded-lg p-4">
+                <div className="flex items-center space-x-2">
+                  <svg className="w-5 h-5 text-yellow-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+                  </svg>
+                  <p className="text-sm text-yellow-800">
+                    No evidence traces available. Evidence visualization requires PDF analysis with evidence collection.
+                  </p>
+                </div>
+              </div>
+            )}
           </div>
         )}
       </div>

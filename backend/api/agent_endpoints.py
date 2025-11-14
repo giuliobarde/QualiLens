@@ -17,6 +17,7 @@ import os
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from agents.orchestrator import AgentOrchestrator, OrchestratorResponse
+from agents.question_classifier import ClassificationResult, QueryType
 from agents.tools.parse_pdf import ParsePDFTool
 from agents.tools.text_section_analyzer import TextSectionAnalyzerTool
 from agents.tools.link_analyzer import LinkAnalyzerTool
@@ -330,8 +331,36 @@ def upload_file():
             logger.info(f"Processing PDF upload with query: {query}")
             logger.info(f"Temporary file path: {temp_file_path}")
             
-            # Process the query through the orchestrator with file path
-            response = orchestrator.process_query(query)
+            # Manually create classification with file path to ensure PDF parsing
+            from agents.question_classifier import ClassificationResult, QueryType
+            classification = ClassificationResult(
+                query_type=QueryType.PAPER_ANALYSIS,
+                confidence=1.0,
+                suggested_tool="parse_pdf",
+                extracted_parameters={
+                    "file_path": temp_file_path,
+                    "query": query
+                },
+                reasoning="PDF file uploaded for analysis"
+            )
+            
+            # Get the paper analysis agent directly
+            paper_agent = orchestrator.agent_registry.get_agent("paper_analysis_agent")
+            if paper_agent:
+                agent_response = paper_agent.process_query(query, classification)
+                response = OrchestratorResponse(
+                    success=agent_response.success,
+                    result=agent_response.result,
+                    agent_used=agent_response.agent_name,
+                    tools_used=agent_response.tools_used,
+                    classification=classification,
+                    error_message=agent_response.error_message,
+                    execution_time_ms=agent_response.execution_time_ms,
+                    timestamp=agent_response.timestamp
+                )
+            else:
+                # Fallback to orchestrator
+                response = orchestrator.process_query(query)
             
             # If the agent system handled it successfully, return the response
             if response.success and response.result:

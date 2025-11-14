@@ -18,6 +18,7 @@ from ..question_classifier import ClassificationResult, QueryType
 # Import enhanced scorer
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from enhanced_scorer import EnhancedScorer
+from ..evidence_collector import EvidenceCollector
 
 logger = logging.getLogger(__name__)
 
@@ -116,13 +117,39 @@ class PaperAnalysisAgent(BaseAgent):
             # Step 1: Parse PDF if needed
             text_content = None
             pdf_metadata = None
+            pdf_pages = None
+            evidence_collector = None
             
-            if classification.suggested_tool == "parse_pdf" or "pdf" in query.lower():
-                pdf_result = self._parse_pdf_if_needed(classification.extracted_parameters)
+            # Check if we have a file path to parse (from upload or query)
+            file_path = None
+            if classification.extracted_parameters:
+                file_path = classification.extracted_parameters.get("file_path")
+            
+            # Also check if query mentions PDF or if suggested tool is parse_pdf
+            should_parse_pdf = (
+                classification.suggested_tool == "parse_pdf" or 
+                "pdf" in query.lower() or 
+                file_path is not None
+            )
+            
+            if should_parse_pdf:
+                pdf_result = self._parse_pdf_if_needed(classification.extracted_parameters or {})
                 if pdf_result and pdf_result.get("success"):
                     text_content = pdf_result.get("text", "")
                     pdf_metadata = pdf_result.get("metadata", {})
+                    # Extract pages for evidence collection
+                    if "pages" in pdf_result:
+                        pdf_pages = pdf_result["pages"]
+                        logger.info(f"Extracted {len(pdf_pages)} pages from PDF for evidence collection")
+                    elif text_content:
+                        # Fallback: split text into pages if not available
+                        pdf_pages = text_content.split("\n\n")[:50]  # Limit to 50 pages
+                        logger.info(f"Using fallback page splitting: {len(pdf_pages)} pages")
                     tools_used.append("parse_pdf")
+            
+            # Initialize evidence collector if we have PDF pages
+            if pdf_pages:
+                evidence_collector = EvidenceCollector(pdf_pages=pdf_pages)
             
             # If no text content from PDF parsing, try to get it from other sources
             if not text_content:
@@ -147,7 +174,9 @@ class PaperAnalysisAgent(BaseAgent):
             # Step 2: Run analysis pipeline based on level
             logger.info(f"Running analysis pipeline for level: {analysis_level}")
             logger.info(f"Text content length: {len(text_content) if text_content else 0}")
-            analysis_results = self._run_analysis_pipeline(text_content, analysis_level, query)
+            analysis_results = self._run_analysis_pipeline(
+                text_content, analysis_level, query, evidence_collector
+            )
             tools_used.extend(analysis_results.get("tools_used", []))
             logger.info(f"Analysis pipeline completed. Tools used: {analysis_results.get('tools_used', [])}")
             logger.info(f"Analysis results keys: {list(analysis_results.keys())}")
@@ -156,7 +185,7 @@ class PaperAnalysisAgent(BaseAgent):
             # Step 3: Integrate results
             logger.info("Integrating analysis results...")
             integrated_result = self._integrate_analysis_results(
-                text_content, analysis_results, pdf_metadata, query
+                text_content, analysis_results, pdf_metadata, query, evidence_collector
             )
             logger.info(f"Integrated result keys: {list(integrated_result.keys())}")
             logger.info(f"Final tools used: {tools_used}")
@@ -194,13 +223,18 @@ class PaperAnalysisAgent(BaseAgent):
     
     def _parse_pdf_if_needed(self, params: Dict[str, Any]) -> Optional[Dict[str, Any]]:
         """Parse PDF if file path is provided."""
-        file_path = params.get('file_path') or params.get('file_path')
-        if file_path:
+        file_path = params.get('file_path')
+        if file_path and os.path.exists(file_path):
             try:
-                return self.execute_tool("parse_pdf", file_path=file_path)
+                logger.info(f"Parsing PDF from file path: {file_path}")
+                result = self.execute_tool("parse_pdf", file_path=file_path)
+                logger.info(f"PDF parsing result - success: {result.get('success')}, pages: {result.get('num_pages', 0)}")
+                return result
             except Exception as e:
                 logger.error(f"PDF parsing failed: {str(e)}")
                 return None
+        else:
+            logger.warning(f"PDF file path not found or invalid: {file_path}")
         return None
     
     def _extract_text_content(self, params: Dict[str, Any]) -> Optional[str]:
@@ -212,7 +246,10 @@ class PaperAnalysisAgent(BaseAgent):
                 return params[source]
         return None
     
-    def _run_analysis_pipeline(self, text_content: str, analysis_level: str, query: str) -> Dict[str, Any]:
+    def _run_analysis_pipeline(
+        self, text_content: str, analysis_level: str, query: str, 
+        evidence_collector: Optional[EvidenceCollector] = None
+    ) -> Dict[str, Any]:
         """Run comprehensive analysis pipeline with all tools."""
         results = {
             "tools_used": [],
@@ -237,7 +274,8 @@ class PaperAnalysisAgent(BaseAgent):
             bias_result = self.execute_tool(
                 "bias_detection_tool",
                 text_content=text_content,
-                severity_threshold="low"
+                severity_threshold="low",
+                evidence_collector=evidence_collector
             )
             if bias_result.get("success"):
                 results["bias_analysis"] = bias_result
@@ -247,7 +285,8 @@ class PaperAnalysisAgent(BaseAgent):
             methodology_result = self.execute_tool(
                 "methodology_analyzer_tool",
                 text_content=text_content,
-                analysis_depth="comprehensive"
+                analysis_depth="comprehensive",
+                evidence_collector=evidence_collector
             )
             if methodology_result.get("success"):
                 results["methodology_analysis"] = methodology_result
@@ -267,7 +306,8 @@ class PaperAnalysisAgent(BaseAgent):
             reproducibility_result = self.execute_tool(
                 "reproducibility_assessor_tool",
                 text_content=text_content,
-                reproducibility_level="detailed"
+                reproducibility_level="detailed",
+                evidence_collector=evidence_collector
             )
             if reproducibility_result.get("success"):
                 results["reproducibility_analysis"] = reproducibility_result
@@ -312,8 +352,11 @@ class PaperAnalysisAgent(BaseAgent):
                 "analysis_level": "comprehensive"
             }
     
-    def _integrate_analysis_results(self, text_content: str, analysis_results: Dict[str, Any], 
-                                  pdf_metadata: Optional[Dict[str, Any]], query: str) -> Dict[str, Any]:
+    def _integrate_analysis_results(
+        self, text_content: str, analysis_results: Dict[str, Any], 
+        pdf_metadata: Optional[Dict[str, Any]], query: str,
+        evidence_collector: Optional[EvidenceCollector] = None
+    ) -> Dict[str, Any]:
         """Integrate all analysis results into a comprehensive response."""
         try:
             integrated_result = {
@@ -462,6 +505,25 @@ class PaperAnalysisAgent(BaseAgent):
             # Generate overall assessment
             integrated_result["overall_assessment"] = self._generate_overall_assessment(analysis_results)
             
+            # Add evidence traces if available
+            if evidence_collector:
+                evidence_list = evidence_collector.get_all_evidence()
+                integrated_result["evidence_traces"] = evidence_list
+                integrated_result["evidence_summary"] = evidence_collector.get_evidence_summary()
+                logger.info(f"✅ Added {len(evidence_collector.evidence_items)} evidence items to result")
+                logger.info(f"   Evidence categories: {set(e.get('category') for e in evidence_list)}")
+                
+                # If no evidence was collected, add some fallback evidence from analysis results
+                if len(evidence_list) == 0:
+                    logger.warning("⚠️ No evidence collected! Adding fallback evidence from analysis results...")
+                    self._add_fallback_evidence(evidence_collector, analysis_results, text_content)
+                    evidence_list = evidence_collector.get_all_evidence()
+                    integrated_result["evidence_traces"] = evidence_list
+                    integrated_result["evidence_summary"] = evidence_collector.get_evidence_summary()
+                    logger.info(f"✅ Added {len(evidence_list)} fallback evidence items")
+            else:
+                logger.warning("⚠️ No evidence collector initialized - evidence traces will not be available")
+            
             # Debug logging for final result
             logger.info(f"🔍 FINAL INTEGRATED RESULT:")
             logger.info(f"   - overall_quality_score: {integrated_result.get('overall_quality_score')}")
@@ -477,6 +539,49 @@ class PaperAnalysisAgent(BaseAgent):
                 "error": str(e),
                 "raw_results": analysis_results
             }
+    
+    def _add_fallback_evidence(self, evidence_collector: EvidenceCollector, analysis_results: Dict[str, Any], text_content: str):
+        """Add fallback evidence when tools don't collect any evidence."""
+        try:
+            # Add evidence from bias analysis
+            if "bias_analysis" in analysis_results:
+                bias_data = analysis_results["bias_analysis"]
+                bias_summary = bias_data.get("bias_summary", "")
+                if bias_summary and len(bias_summary) > 20:
+                    evidence_collector.add_evidence(
+                        category="bias",
+                        text_snippet=bias_summary[:200],
+                        rationale="Bias analysis summary",
+                        confidence=0.6,
+                        severity="medium"
+                    )
+            
+            # Add evidence from methodology analysis
+            if "methodology_analysis" in analysis_results:
+                methodology_data = analysis_results["methodology_analysis"]
+                quality_rating = methodology_data.get("quality_rating", "")
+                if quality_rating and len(quality_rating) > 20:
+                    evidence_collector.add_evidence(
+                        category="methodology",
+                        text_snippet=quality_rating[:200],
+                        rationale="Methodology quality assessment",
+                        confidence=0.7
+                    )
+            
+            # Add evidence from reproducibility analysis
+            if "reproducibility_analysis" in analysis_results:
+                repro_data = analysis_results["reproducibility_analysis"]
+                repro_score = repro_data.get("reproducibility_score", 0.0)
+                if repro_score > 0:
+                    evidence_collector.add_evidence(
+                        category="reproducibility",
+                        text_snippet=f"Reproducibility score: {repro_score:.2f}",
+                        rationale=f"Study reproducibility assessment with score {repro_score:.2f}",
+                        confidence=0.7,
+                        score_impact=repro_score * 10.0
+                    )
+        except Exception as e:
+            logger.error(f"Failed to add fallback evidence: {str(e)}")
     
     def _generate_overall_assessment(self, analysis_results: Dict[str, Any]) -> Dict[str, Any]:
         """Generate an overall assessment based on all analysis results."""

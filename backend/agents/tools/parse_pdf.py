@@ -454,6 +454,7 @@ class ParsePDFTool(BaseTool):
                 "source_path": os.path.abspath(file_path),
             },
             "num_pages": len(pages),
+            "pages": pages,  # Include pages for evidence collection
             "text": full_text,
             "sections": [
                 {
