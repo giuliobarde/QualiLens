@@ -15,6 +15,11 @@ const PDFViewerWithHighlights = dynamic(
   { ssr: false }
 );
 
+const SimplePDFViewer = dynamic(
+  () => import('@/components/SimplePDFViewer'),
+  { ssr: false }
+);
+
 export default function Home() {
   const [query, setQuery] = useState('');
   const [attachedFile, setAttachedFile] = useState<File | null>(null);
@@ -27,6 +32,7 @@ export default function Home() {
   const [isDragging, setIsDragging] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [selectedEvidenceId, setSelectedEvidenceId] = useState<string | null>(null);
+  const [useSimplePDFViewer, setUseSimplePDFViewer] = useState(true); // Use simple viewer by default for better reliability
   const fileInputRef = useRef<HTMLInputElement>(null);
   const dropZoneRef = useRef<HTMLDivElement>(null);
 
@@ -543,40 +549,32 @@ export default function Home() {
                         </div>
                         <h3 className="text-lg font-semibold text-gray-800">Document Viewer</h3>
                       </div>
-                      {attachedFile && (
-                        <span className="text-xs text-gray-500">
-                          {(attachedFile.size / 1024 / 1024).toFixed(2)} MB
-                        </span>
-                      )}
+                      <div className="flex items-center space-x-3">
+                        {attachedFile && (
+                          <>
+                            <button
+                              onClick={() => setUseSimplePDFViewer(!useSimplePDFViewer)}
+                              className="text-xs px-3 py-1.5 bg-blue-100 hover:bg-blue-200 text-blue-700 rounded-lg transition-all"
+                              title="Toggle PDF viewer"
+                            >
+                              {useSimplePDFViewer ? 'Advanced View' : 'Simple View'}
+                            </button>
+                            <span className="text-xs text-gray-500">
+                              {(attachedFile.size / 1024 / 1024).toFixed(2)} MB
+                            </span>
+                          </>
+                        )}
+                      </div>
                     </div>
                   </div>
                   <div className="h-[calc(100%-73px)]">
                     {pdfContent && (
                       <div className="w-full h-full">
-                        {attachedFile && attachedFile.size > 3 * 1024 * 1024 ? (
-                          <div className="flex flex-col items-center justify-center h-full bg-gradient-to-br from-gray-50 to-gray-100">
-                            <div className="text-center p-8">
-                              <div className="w-20 h-20 bg-yellow-100 rounded-2xl flex items-center justify-center mx-auto mb-4">
-                                <svg className="w-10 h-10 text-yellow-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
-                                </svg>
-                              </div>
-                              <h3 className="text-xl font-semibold text-gray-900 mb-2">Large PDF File</h3>
-                              <p className="text-sm text-gray-600 mb-6 max-w-md mx-auto">
-                                This PDF is too large to display inline. Download it to view the full document.
-                              </p>
-                              <a
-                                href={pdfContent}
-                                download={attachedFile.name}
-                                className="inline-flex items-center space-x-2 px-6 py-3 bg-gradient-to-r from-blue-600 to-indigo-600 text-white rounded-xl hover:from-blue-700 hover:to-indigo-700 transition-all shadow-lg hover:shadow-xl"
-                              >
-                                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
-                                </svg>
-                                <span>Download PDF</span>
-                              </a>
-                            </div>
-                          </div>
+                        {useSimplePDFViewer ? (
+                          <SimplePDFViewer
+                            pdfUrl={pdfContent}
+                            fileName={attachedFile?.name}
+                          />
                         ) : (
                           <PDFViewerWithHighlights
                             pdfUrl={pdfContent}
