@@ -23,6 +23,8 @@ interface EvidenceVisualizationProps {
   evidenceTraces: EvidenceItem[];
   pdfContent?: string | null;
   onEvidenceClick?: (evidence: EvidenceItem) => void;
+  selectedCategory?: string;
+  onCategoryChange?: (category: string) => void;
 }
 
 type EvidenceCategory = 'all' | 'bias' | 'methodology' | 'reproducibility' | 'statistics';
@@ -30,9 +32,22 @@ type EvidenceCategory = 'all' | 'bias' | 'methodology' | 'reproducibility' | 'st
 export default function EvidenceVisualization({
   evidenceTraces = [],
   pdfContent,
-  onEvidenceClick
+  onEvidenceClick,
+  selectedCategory: externalSelectedCategory,
+  onCategoryChange
 }: EvidenceVisualizationProps) {
-  const [selectedCategory, setSelectedCategory] = useState<EvidenceCategory>('all');
+  const [internalSelectedCategory, setInternalSelectedCategory] = useState<EvidenceCategory>('all');
+
+  // Use external category if provided, otherwise use internal state
+  const selectedCategory = (externalSelectedCategory as EvidenceCategory) || internalSelectedCategory;
+
+  // Handler that updates both internal and external state
+  const handleCategoryChange = (category: EvidenceCategory) => {
+    setInternalSelectedCategory(category);
+    if (onCategoryChange) {
+      onCategoryChange(category);
+    }
+  };
   const [selectedEvidence, setSelectedEvidence] = useState<EvidenceItem | null>(null);
   const [hoveredEvidenceId, setHoveredEvidenceId] = useState<string | null>(null);
   const pdfViewerRef = useRef<HTMLIFrameElement>(null);
@@ -167,7 +182,7 @@ export default function EvidenceVisualization({
           {(['all', 'bias', 'methodology', 'reproducibility', 'statistics'] as EvidenceCategory[]).map((category) => (
             <button
               key={category}
-              onClick={() => setSelectedCategory(category)}
+              onClick={() => handleCategoryChange(category)}
               className={`px-3 py-1.5 rounded-lg text-sm font-medium transition-all ${
                 selectedCategory === category
                   ? 'bg-blue-600 text-white shadow-md'

@@ -20,6 +20,11 @@ const SimplePDFViewer = dynamic(
   { ssr: false }
 );
 
+const EnhancedPDFViewer = dynamic(
+  () => import('@/components/EnhancedPDFViewer'),
+  { ssr: false }
+);
+
 export default function Home() {
   const [query, setQuery] = useState('');
   const [attachedFile, setAttachedFile] = useState<File | null>(null);
@@ -32,7 +37,8 @@ export default function Home() {
   const [isDragging, setIsDragging] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [selectedEvidenceId, setSelectedEvidenceId] = useState<string | null>(null);
-  const [useSimplePDFViewer, setUseSimplePDFViewer] = useState(true); // Use simple viewer by default for better reliability
+  const [useSimplePDFViewer, setUseSimplePDFViewer] = useState(false); // Use enhanced viewer with evidence by default
+  const [evidenceCategoryFilter, setEvidenceCategoryFilter] = useState<string>('all');
   const fileInputRef = useRef<HTMLInputElement>(null);
   const dropZoneRef = useRef<HTMLDivElement>(null);
 
@@ -576,10 +582,12 @@ export default function Home() {
                             fileName={attachedFile?.name}
                           />
                         ) : (
-                          <PDFViewerWithHighlights
+                          <EnhancedPDFViewer
                             pdfUrl={pdfContent}
+                            fileName={attachedFile?.name}
                             evidenceTraces={analysisResult?.evidence_traces || []}
                             selectedEvidenceId={selectedEvidenceId}
+                            categoryFilter={evidenceCategoryFilter}
                             onEvidenceClick={(evidence) => {
                               setSelectedEvidenceId(evidence.id);
                             }}
@@ -611,6 +619,8 @@ export default function Home() {
                 <EvidenceVisualization
                   evidenceTraces={analysisResult.evidence_traces}
                   pdfContent={pdfContent}
+                  selectedCategory={evidenceCategoryFilter}
+                  onCategoryChange={setEvidenceCategoryFilter}
                   onEvidenceClick={(evidence) => {
                     setSelectedEvidenceId(evidence.id);
                     // Scroll to the page in PDF viewer

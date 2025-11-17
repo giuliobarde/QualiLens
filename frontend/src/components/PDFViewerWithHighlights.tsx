@@ -3,9 +3,9 @@
 import { useEffect, useRef, useState, useCallback } from 'react';
 import { Document, Page, pdfjs } from 'react-pdf';
 
-// Set up PDF.js worker - use CDN for better reliability
+// Set up PDF.js worker - use unpkg CDN for better reliability
 if (typeof window !== 'undefined') {
-  pdfjs.GlobalWorkerOptions.workerSrc = `//cdnjs.cloudflare.com/ajax/libs/pdf.js/${pdfjs.version}/pdf.worker.min.mjs`;
+  pdfjs.GlobalWorkerOptions.workerSrc = `https://unpkg.com/pdfjs-dist@${pdfjs.version}/build/pdf.worker.min.mjs`;
   console.log('📄 PDF.js worker configured:', pdfjs.GlobalWorkerOptions.workerSrc);
 }
 
