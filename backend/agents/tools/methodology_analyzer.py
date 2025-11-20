@@ -8,6 +8,7 @@ sample characteristics, and methodological quality assessment.
 import logging
 import json
 import hashlib
+import re
 from typing import Dict, Any, Optional, List
 from .base_tool import BaseTool, ToolMetadata
 
@@ -92,19 +93,62 @@ class MethodologyAnalyzerTool(BaseTool):
             
             # Always use comprehensive methodology analysis
             methodology_result = self._analyze_comprehensive_methodology(text_content, focus_areas)
-            
+
             # Debug logging for score tracking
             overall_score = methodology_result.get("overall_quality_score", 0)
             logger.info(f"🔍 METHODOLOGY ANALYZER FINAL RESULT:")
             logger.info(f"   - overall_quality_score: {overall_score}")
             logger.info(f"   - quantitative_scores: {methodology_result.get('quantitative_scores', {})}")
             logger.info(f"   - quality_rating: {methodology_result.get('quality_rating', '')}")
-            
+
             # Collect evidence if evidence_collector is provided
             if evidence_collector:
+                # Collect evidence from detected methodologies
+                detected_methodologies = methodology_result.get("detected_methodologies", {})
+                methodologies_list = detected_methodologies.get("methodologies", [])
+
+                logger.info(f"📊 Collecting evidence for {len(methodologies_list)} detected methodologies")
+
+                for methodology in methodologies_list:
+                    # Add evidence for each detected methodology
+                    methodology_type = methodology.get("type", "Unknown")
+                    evidence_text = methodology.get("evidence_text", "")
+                    quality_assessment = methodology.get("quality_assessment", {})
+
+                    if evidence_text and len(evidence_text) > 20:
+                        # Determine score impact based on quality rating
+                        quality_rating = quality_assessment.get("quality_rating", "fair")
+                        score_impact_map = {
+                            "excellent": 10.0,
+                            "good": 5.0,
+                            "fair": 0.0,
+                            "poor": -5.0,
+                            "very_poor": -10.0
+                        }
+                        score_impact = score_impact_map.get(quality_rating, 0.0)
+
+                        # Create comprehensive rationale
+                        rationale_parts = [f"Methodology: {methodology_type}"]
+                        if quality_assessment.get("is_appropriate") is False:
+                            rationale_parts.append("⚠️ This methodology may not be appropriate for the research question.")
+                        rationale_parts.append(quality_assessment.get("rationale", ""))
+
+                        rationale = " ".join(rationale_parts)
+
+                        evidence_collector.add_evidence(
+                            category="methodology",
+                            text_snippet=evidence_text[:300],
+                            rationale=rationale[:500],
+                            confidence=methodology.get("confidence", 0.7),
+                            score_impact=score_impact
+                        )
+
+                        logger.info(f"✅ Added evidence for methodology: {methodology_type} (impact: {score_impact})")
+
+                # Also collect evidence from traditional strengths/weaknesses
                 strengths = methodology_result.get("methodological_strengths", [])
                 weaknesses = methodology_result.get("methodological_weaknesses", [])
-                
+
                 # Add evidence for strengths
                 for strength in strengths[:3]:  # Top 3 strengths
                     if strength and len(strength) > 20:
@@ -115,7 +159,7 @@ class MethodologyAnalyzerTool(BaseTool):
                             confidence=0.7,
                             score_impact=5.0
                         )
-                
+
                 # Add evidence for weaknesses
                 for weakness in weaknesses[:3]:  # Top 3 weaknesses
                     if weakness and len(weakness) > 20:
@@ -140,6 +184,7 @@ class MethodologyAnalyzerTool(BaseTool):
                 "quality_rating": methodology_result.get("quality_rating", ""),
                 "overall_quality_score": overall_score,
                 "quantitative_scores": methodology_result.get("quantitative_scores", {}),
+                "detected_methodologies": methodology_result.get("detected_methodologies", {}),  # NEW: Include detected methodologies
                 "analysis_depth": "comprehensive",
                 "focus_areas": focus_areas or [],
                 "tool_used": "methodology_analyzer_tool"
@@ -156,11 +201,16 @@ class MethodologyAnalyzerTool(BaseTool):
     def _analyze_comprehensive_methodology(self, text_content: str, focus_areas: Optional[List[str]]) -> Dict[str, Any]:
         """Analyze comprehensive methodology elements with field-specific standards, quantitative scoring, and cross-tool integration."""
         try:
-            # Check cache first for consistent scoring
+            # ALWAYS detect methodologies first (not cached) - this is the main analysis
+            logger.info("🔍 Starting methodology detection (always fresh)")
+            detected_methodologies = self._detect_all_methodologies(text_content)
+            logger.info(f"✅ Detected {len(detected_methodologies.get('methodologies', []))} methodologies")
+
+            # Check cache for scores only (but always re-detect methodologies)
             cached_result = self.score_cache.get_cached_score(text_content)
             if cached_result:
-                logger.info("✅ Using cached score for consistency")
-                # Reconstruct full result from cache
+                logger.info("✅ Using cached score for consistency, but with fresh methodology detection")
+                # Reconstruct result from cache BUT use fresh methodology detection
                 return {
                     "field_detection": {"primary_field": cached_result.get("field_detected", "unknown")},
                     "quantitative_scores": cached_result.get("score_breakdown", {}),
@@ -174,8 +224,9 @@ class MethodologyAnalyzerTool(BaseTool):
                     "analysis_methods": {},
                     "validity_measures": {},
                     "ethical_considerations": {},
-                    "methodological_strengths": ["Score retrieved from cache for consistency"],
+                    "methodological_strengths": [],  # Empty - don't use placeholder text that becomes evidence
                     "methodological_weaknesses": [],
+                    "detected_methodologies": detected_methodologies,  # ALWAYS use fresh detection
                     "quality_rating": self._determine_quality_level(cached_result.get("overall_score", 0))
                 }
 
@@ -190,18 +241,20 @@ class MethodologyAnalyzerTool(BaseTool):
             field_standards = self._get_field_specific_standards(field_detection.get('primary_field', 'general'))
 
             # Step 3: Generate comprehensive analysis with field-specific prompts
+            # (methodologies already detected above)
             methodology_analysis = self._generate_field_specific_analysis(text_content, focus_areas, field_standards)
 
-            # Step 4: Add quantitative scoring and risk assessment
+            # Step 5: Add quantitative scoring and risk assessment
             quantitative_scores = self._calculate_quantitative_scores(methodology_analysis, field_standards)
 
-            # Step 5: Cross-tool validation and consistency checking
+            # Step 6: Cross-tool validation and consistency checking
             cross_validation = self._perform_cross_tool_validation(text_content, methodology_analysis)
 
-            # Step 6: Integrate all results
+            # Step 7: Integrate all results
             comprehensive_result = {
                 **methodology_analysis,
                 "field_detection": field_detection,
+                "detected_methodologies": detected_methodologies,  # Add detected methodologies
                 "quantitative_scores": quantitative_scores,
                 "cross_validation": cross_validation,
                 "overall_quality_score": quantitative_scores.get("scores", {}).get("overall_score", 0),
@@ -211,11 +264,13 @@ class MethodologyAnalyzerTool(BaseTool):
             }
 
             # Cache the score for future consistency
+            # NOTE: We DO NOT cache detected_methodologies - always detect fresh
             content_hash = hashlib.sha256(text_content.encode('utf-8')).hexdigest()
             cache_data = {
                 "overall_score": comprehensive_result.get("overall_quality_score", 0),
                 "score_breakdown": quantitative_scores,
                 "field_detected": field_detection.get("primary_field", "unknown")
+                # detected_methodologies intentionally NOT cached - always detect fresh
             }
             self.score_cache.cache_score(text_content, cache_data)
             comprehensive_result["content_hash"] = content_hash
@@ -226,6 +281,181 @@ class MethodologyAnalyzerTool(BaseTool):
             logger.error(f"Comprehensive methodology analysis failed: {str(e)}")
             return {"error": str(e)}
     
+    def _detect_all_methodologies(self, text_content: str) -> Dict[str, Any]:
+        """
+        Detect all research methodologies used in the paper with comprehensive coverage.
+        Returns detailed information about each methodology including quality assessment.
+        """
+        try:
+            # Use more text for better methodology detection (12000 chars instead of 8000)
+            # Focus on the beginning (where methods are often described) and look for methodology keywords
+            text_to_analyze = text_content[:12000]
+
+            # Try to find and prioritize methodology sections
+            text_lower = text_content[:20000].lower()
+            method_indicators = ["methods", "methodology", "study design", "experimental design",
+                               "materials and methods", "participants", "procedure", "data collection"]
+
+            # Look for methodology section and extract more context from there
+            for indicator in method_indicators:
+                pos = text_lower.find(indicator)
+                if pos > 0:
+                    # Extract a large chunk around the methodology section
+                    start = max(0, pos - 500)
+                    end = min(len(text_content), pos + 10000)
+                    text_to_analyze = text_content[start:end]
+                    logger.info(f"Found '{indicator}' section at position {pos}, using focused extraction")
+                    break
+
+            prompt = f"""
+Analyze this research paper to identify ALL methodologies used. Be comprehensive and detect multiple methodologies if present.
+
+PAPER CONTENT (focused on methodology sections):
+{text_to_analyze}
+
+Identify ALL methodologies from these categories and provide detailed assessment:
+
+1. **Experimental Methods:**
+   - Randomized Controlled Trial (RCT)
+   - Quasi-Experimental Design
+   - Laboratory Experiment
+   - Field Experiment
+   - A/B Testing
+   - Factorial Design
+   - Crossover Design
+
+2. **Observational Methods:**
+   - Cohort Study (Prospective/Retrospective)
+   - Case-Control Study
+   - Cross-Sectional Study
+   - Longitudinal Study
+   - Ecological Study
+   - Time Series Analysis
+
+3. **Qualitative Methods:**
+   - Ethnography
+   - Grounded Theory
+   - Phenomenology
+   - Case Study
+   - Narrative Analysis
+   - Discourse Analysis
+   - Content Analysis
+   - Thematic Analysis
+   - Participatory Action Research
+
+4. **Mixed Methods:**
+   - Convergent Design
+   - Explanatory Sequential Design
+   - Exploratory Sequential Design
+   - Embedded Design
+   - Transformative Design
+
+5. **Survey & Sampling Methods:**
+   - Cross-Sectional Survey
+   - Longitudinal Survey
+   - Panel Study
+   - Probability Sampling
+   - Non-Probability Sampling
+   - Stratified Sampling
+   - Cluster Sampling
+
+6. **Review Methods:**
+   - Systematic Review
+   - Meta-Analysis
+   - Scoping Review
+   - Rapid Review
+   - Umbrella Review
+   - Narrative Review
+
+7. **Specialized Methods:**
+   - Single-Case Design
+   - N-of-1 Trial
+   - Simulation Study
+   - Modeling Study
+   - Secondary Data Analysis
+   - Registry-Based Study
+   - Comparative Effectiveness Research
+
+For EACH methodology detected, provide:
+{{
+  "methodologies": [
+    {{
+      "type": "Methodology name (e.g., 'Randomized Controlled Trial')",
+      "category": "Category (experimental/observational/qualitative/mixed/survey/review/specialized)",
+      "confidence": 0.0-1.0,
+      "evidence_text": "Specific text snippet from paper indicating this methodology (direct quote)",
+      "page_indicators": ["Page 3: Methods section", "Page 5: Study design figure"],
+      "quality_assessment": {{
+        "is_appropriate": true/false,
+        "rationale": "Detailed explanation of whether this methodology is appropriate for the research question and why. Be specific about what makes it good or bad.",
+        "strengths": ["Strength 1 with specific details", "Strength 2 with specific details"],
+        "weaknesses": ["Weakness 1 with specific details", "Weakness 2 with specific details"],
+        "compliance_with_standards": "How well it follows field-specific reporting standards (CONSORT, STROBE, PRISMA, COREQ, etc.)",
+        "missing_elements": ["Element 1 that should be present", "Element 2 that should be reported"],
+        "quality_rating": "excellent/good/fair/poor/very_poor"
+      }},
+      "implementation_quality": {{
+        "sample_size_adequate": true/false,
+        "randomization_proper": true/false/not_applicable,
+        "blinding_implemented": true/false/not_applicable,
+        "control_group_present": true/false/not_applicable,
+        "confounding_controlled": true/false,
+        "selection_bias_addressed": true/false,
+        "measurement_validity": "high/medium/low",
+        "reporting_completeness": "complete/partial/incomplete"
+      }}
+    }}
+  ],
+  "primary_methodology": "The main methodology used",
+  "methodology_combination_assessment": "If multiple methodologies are used, assess whether they complement each other well and are appropriately integrated",
+  "overall_methodological_approach": "Brief description of the overall approach (e.g., 'Multi-center randomized controlled trial with qualitative interviews')"
+}}
+
+Be thorough and look for:
+- Explicit methodology statements ("We conducted a...", "This randomized controlled trial...")
+- Study design descriptions
+- Sampling procedures
+- Data collection methods
+- Analysis approaches
+- References to methodological frameworks
+
+Return ONLY valid JSON. If no clear methodology is found, return an empty methodologies array.
+"""
+
+            llm_response = self._get_openai_client().generate_completion(
+                prompt=prompt,
+                model="gpt-4-turbo-preview",  # Use GPT-4 Turbo for better methodology detection
+                max_tokens=4000,
+                temperature=0.0
+            )
+
+            if llm_response:
+                try:
+                    # Try to extract JSON from the response (in case there's text before/after)
+                    # Look for JSON between curly braces
+                    import re
+                    json_match = re.search(r'\{.*\}', llm_response, re.DOTALL)
+                    if json_match:
+                        json_str = json_match.group(0)
+                        result = json.loads(json_str)
+                        logger.info(f"✅ Detected {len(result.get('methodologies', []))} methodologies")
+                        return result
+                    else:
+                        logger.error("No JSON found in LLM response")
+                        logger.error(f"Response: {llm_response[:500]}")
+                        return {"methodologies": [], "primary_methodology": "unknown"}
+                except json.JSONDecodeError as e:
+                    logger.error(f"Failed to parse methodology detection response: {str(e)}")
+                    logger.error(f"Response preview: {llm_response[:1000]}")
+                    return {"methodologies": [], "primary_methodology": "unknown"}
+            else:
+                logger.error("No response from LLM for methodology detection")
+                return {"methodologies": [], "primary_methodology": "unknown"}
+
+        except Exception as e:
+            logger.error(f"Methodology detection failed: {str(e)}")
+            return {"methodologies": [], "primary_methodology": "unknown", "error": str(e)}
+
     def _detect_research_field(self, text_content: str) -> Dict[str, Any]:
         """Detect the primary research field based on content analysis."""
         try:
@@ -309,9 +539,9 @@ Focus on identifying the most relevant field for applying appropriate methodolog
         try:
             checklist = field_standards.get("checklist", "GENERIC")
             key_criteria = field_standards.get("key_criteria", [])
-            
+
             prompt = f"""
-You are an expert research analyst specializing in {field_standards.get('checklist', 'research methodology')}. 
+You are an expert research analyst specializing in {field_standards.get('checklist', 'research methodology')}.
 Provide a comprehensive analysis of the research methodology using {checklist} standards.
 
 PAPER CONTENT:

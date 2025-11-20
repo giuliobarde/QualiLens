@@ -68,7 +68,7 @@ class StatisticalValidatorTool(BaseTool):
         )
     
     def execute(self, text_content: str, validation_level: str = "detailed",
-                statistical_tests: Optional[List[str]] = None) -> Dict[str, Any]:
+                statistical_tests: Optional[List[str]] = None, evidence_collector=None) -> Dict[str, Any]:
         """
         Validate statistical methods and results.
         
@@ -85,6 +85,63 @@ class StatisticalValidatorTool(BaseTool):
             
             # Always use comprehensive statistical validation
             validation_result = self._validate_comprehensive_statistics(text_content, statistical_tests)
+            
+            # Collect evidence if evidence_collector is provided
+            if evidence_collector:
+                # Collect negative evidence (concerns)
+                concerns = validation_result.get("statistical_concerns", [])
+                for concern in concerns[:5]:  # Top 5 concerns
+                    if isinstance(concern, dict):
+                        concern_text = concern.get("concern", str(concern))
+                        concern_snippet = self._find_text_snippet(text_content, concern_text)
+                        evidence_collector.add_evidence(
+                            category="statistics",
+                            text_snippet=concern_snippet[:300] if concern_snippet else concern_text[:300],
+                            rationale=f"Statistical concern: {concern_text}",
+                            severity=concern.get("severity", "medium"),
+                            confidence=0.75,
+                            score_impact=-8.0 if concern.get("severity") == "high" else -4.0
+                        )
+                    elif isinstance(concern, str) and len(concern) > 20:
+                        concern_snippet = self._find_text_snippet(text_content, concern)
+                        evidence_collector.add_evidence(
+                            category="statistics",
+                            text_snippet=concern_snippet[:300] if concern_snippet else concern[:300],
+                            rationale=f"Statistical concern: {concern}",
+                            confidence=0.75,
+                            score_impact=-4.0
+                        )
+                
+                # Collect positive evidence (appropriate tests, power analysis, etc.)
+                test_appropriateness = validation_result.get("test_appropriateness", {})
+                power_analysis = validation_result.get("power_analysis", {})
+                
+                # Positive evidence for appropriate statistical tests
+                if test_appropriateness and any(
+                    v.get("appropriate", False) for v in test_appropriateness.values() 
+                    if isinstance(v, dict)
+                ):
+                    test_snippet = self._find_text_snippet(text_content, "statistical test")
+                    if test_snippet:
+                        evidence_collector.add_evidence(
+                            category="statistics",
+                            text_snippet=test_snippet[:300],
+                            rationale="Appropriate statistical tests used",
+                            confidence=0.8,
+                            score_impact=+6.0
+                        )
+                
+                # Positive evidence for power analysis
+                if power_analysis and power_analysis.get("performed", False):
+                    power_snippet = self._find_text_snippet(text_content, "power analysis")
+                    if power_snippet:
+                        evidence_collector.add_evidence(
+                            category="statistics",
+                            text_snippet=power_snippet[:300],
+                            rationale="Power analysis performed",
+                            confidence=0.8,
+                            score_impact=+8.0
+                        )
             
             return {
                 "success": True,
@@ -107,6 +164,32 @@ class StatisticalValidatorTool(BaseTool):
                 "error": str(e),
                 "tool_used": "statistical_validator_tool"
             }
+    
+    def _find_text_snippet(self, text_content: str, search_text: str) -> Optional[str]:
+        """Find a text snippet in content around search text."""
+        if not text_content or not search_text:
+            return None
+        
+        text_lower = text_content.lower()
+        search_lower = search_text.lower()
+        
+        # Try to find search text
+        idx = text_lower.find(search_lower)
+        if idx == -1:
+            # Try finding key words
+            words = search_lower.split()[:3]  # First 3 words
+            for word in words:
+                if len(word) > 4:  # Only meaningful words
+                    idx = text_lower.find(word)
+                    if idx != -1:
+                        break
+        
+        if idx != -1:
+            start = max(0, idx - 100)
+            end = min(len(text_content), idx + 200)
+            return text_content[start:end].strip()
+        
+        return None
     
     def _validate_comprehensive_statistics(self, text_content: str, statistical_tests: Optional[List[str]]) -> Dict[str, Any]:
         """Validate comprehensive statistical elements."""

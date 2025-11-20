@@ -69,59 +69,196 @@ export default function ScrollableAnalysisSections({ data, className = '' }: Scr
     </ErrorBoundary>
   );
 
-  const renderMethodology = () => (
-    <ErrorBoundary>
-      <div className="space-y-4">
-        {data?.study_design && (
-          <div>
-            <h4 className="font-semibold text-gray-800 mb-2">Study Design</h4>
-            <SafeRenderer data={data.study_design} className="text-sm text-gray-600" />
-          </div>
-        )}
-        
-        {data?.methodological_strengths && Array.isArray(data.methodological_strengths) && data.methodological_strengths.length > 0 && (
-          <div>
-            <h4 className="font-semibold text-green-800 mb-2">Strengths</h4>
-            <ul className="space-y-1">
-              {data.methodological_strengths.slice(0, 3).map((strength: any, index: number) => (
-                <li key={index} className="text-sm text-green-700 flex items-start">
-                  <span className="text-green-500 mr-2">✓</span>
-                  <SafeRenderer data={strength} />
-                </li>
-              ))}
-            </ul>
-          </div>
-        )}
-        
-        {data?.methodological_weaknesses && Array.isArray(data.methodological_weaknesses) && data.methodological_weaknesses.length > 0 && (
-          <div>
-            <h4 className="font-semibold text-red-800 mb-2">Weaknesses</h4>
-            <ul className="space-y-1">
-              {data.methodological_weaknesses.slice(0, 3).map((weakness: any, index: number) => (
-                <li key={index} className="text-sm text-red-700 flex items-start">
-                  <span className="text-red-500 mr-2">⚠</span>
-                  <SafeRenderer data={weakness} />
-                </li>
-              ))}
-            </ul>
-          </div>
-        )}
-        
-        {data?.methodology_quality_rating && (
-          <div className="bg-gray-50 p-3 rounded">
-            <h4 className="font-semibold text-gray-800 mb-1">Quality Rating</h4>
-            <span className={`px-2 py-1 text-xs rounded ${
-              String(data.methodology_quality_rating).toLowerCase().includes('high') ? 'bg-green-100 text-green-800' :
-              String(data.methodology_quality_rating).toLowerCase().includes('medium') ? 'bg-yellow-100 text-yellow-800' :
-              'bg-red-100 text-red-800'
-            }`}>
-              <SafeRenderer data={data.methodology_quality_rating} />
-            </span>
-          </div>
-        )}
-      </div>
-    </ErrorBoundary>
-  );
+  const renderMethodology = () => {
+    const methodologies = data?.detected_methodologies?.methodologies || [];
+    const primaryMethodology = data?.primary_methodology || data?.detected_methodologies?.primary_methodology;
+    const overallApproach = data?.overall_methodological_approach || data?.detected_methodologies?.overall_methodological_approach;
+
+    const getQualityBadgeColor = (rating: string) => {
+      switch (rating?.toLowerCase()) {
+        case 'excellent': return 'bg-green-100 text-green-800 border-green-300';
+        case 'good': return 'bg-blue-100 text-blue-800 border-blue-300';
+        case 'fair': return 'bg-yellow-100 text-yellow-800 border-yellow-300';
+        case 'poor': return 'bg-orange-100 text-orange-800 border-orange-300';
+        case 'very_poor': return 'bg-red-100 text-red-800 border-red-300';
+        default: return 'bg-gray-100 text-gray-800 border-gray-300';
+      }
+    };
+
+    const getCategoryIcon = (category: string) => {
+      switch (category?.toLowerCase()) {
+        case 'experimental': return '🧪';
+        case 'observational': return '👁️';
+        case 'qualitative': return '💬';
+        case 'mixed': return '🔀';
+        case 'survey': return '📋';
+        case 'review': return '📚';
+        case 'specialized': return '⚡';
+        default: return '🔬';
+      }
+    };
+
+    return (
+      <ErrorBoundary>
+        <div className="space-y-4">
+          {/* Overall Methodological Approach */}
+          {overallApproach && (
+            <div className="bg-gradient-to-r from-blue-50 to-indigo-50 p-4 rounded-lg border-l-4 border-blue-500">
+              <h4 className="font-semibold text-blue-900 mb-2">Methodological Approach</h4>
+              <SafeRenderer data={overallApproach} className="text-sm text-blue-800" />
+            </div>
+          )}
+
+          {/* Primary Methodology */}
+          {primaryMethodology && primaryMethodology !== 'Unknown' && (
+            <div className="bg-indigo-50 p-3 rounded-lg border border-indigo-200">
+              <h4 className="font-semibold text-indigo-900 mb-1 text-sm">Primary Methodology</h4>
+              <span className="text-indigo-800 font-medium">{primaryMethodology}</span>
+            </div>
+          )}
+
+          {/* Detected Methodologies */}
+          {methodologies.length > 0 && (
+            <div>
+              <h4 className="font-semibold text-gray-800 mb-3">Detected Methodologies ({methodologies.length})</h4>
+              <div className="space-y-3">
+                {methodologies.map((methodology: any, index: number) => (
+                  <div key={index} className="bg-white border-2 border-gray-200 rounded-lg p-4 hover:border-blue-300 transition-all">
+                    {/* Methodology Header */}
+                    <div className="flex items-start justify-between mb-2">
+                      <div className="flex items-center space-x-2">
+                        <span className="text-xl">{getCategoryIcon(methodology.category)}</span>
+                        <div>
+                          <h5 className="font-semibold text-gray-900">{methodology.type}</h5>
+                          <span className="text-xs text-gray-500 uppercase">{methodology.category}</span>
+                        </div>
+                      </div>
+                      {methodology.quality_assessment?.quality_rating && (
+                        <span className={`px-2 py-1 text-xs font-medium rounded border ${getQualityBadgeColor(methodology.quality_assessment.quality_rating)}`}>
+                          {methodology.quality_assessment.quality_rating.replace('_', ' ')}
+                        </span>
+                      )}
+                    </div>
+
+                    {/* Quality Assessment Rationale */}
+                    {methodology.quality_assessment?.rationale && (
+                      <div className="mb-3 p-3 bg-gray-50 rounded">
+                        <p className="text-xs font-semibold text-gray-700 mb-1">Assessment:</p>
+                        <SafeRenderer data={methodology.quality_assessment.rationale} className="text-sm text-gray-700" />
+                      </div>
+                    )}
+
+                    {/* Appropriateness Indicator */}
+                    {methodology.quality_assessment?.is_appropriate !== undefined && (
+                      <div className={`flex items-center space-x-2 mb-2 p-2 rounded ${
+                        methodology.quality_assessment.is_appropriate
+                          ? 'bg-green-50 text-green-800'
+                          : 'bg-red-50 text-red-800'
+                      }`}>
+                        <span>{methodology.quality_assessment.is_appropriate ? '✓' : '⚠️'}</span>
+                        <span className="text-xs font-medium">
+                          {methodology.quality_assessment.is_appropriate
+                            ? 'Appropriate for research question'
+                            : 'May not be appropriate for research question'}
+                        </span>
+                      </div>
+                    )}
+
+                    {/* Strengths & Weaknesses */}
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-3 mb-2">
+                      {methodology.quality_assessment?.strengths && methodology.quality_assessment.strengths.length > 0 && (
+                        <div>
+                          <p className="text-xs font-semibold text-green-700 mb-1">Strengths:</p>
+                          <ul className="space-y-1">
+                            {methodology.quality_assessment.strengths.slice(0, 2).map((strength: string, idx: number) => (
+                              <li key={idx} className="text-xs text-green-700 flex items-start">
+                                <span className="text-green-500 mr-1">✓</span>
+                                <SafeRenderer data={strength} />
+                              </li>
+                            ))}
+                          </ul>
+                        </div>
+                      )}
+                      {methodology.quality_assessment?.weaknesses && methodology.quality_assessment.weaknesses.length > 0 && (
+                        <div>
+                          <p className="text-xs font-semibold text-red-700 mb-1">Weaknesses:</p>
+                          <ul className="space-y-1">
+                            {methodology.quality_assessment.weaknesses.slice(0, 2).map((weakness: string, idx: number) => (
+                              <li key={idx} className="text-xs text-red-700 flex items-start">
+                                <span className="text-red-500 mr-1">⚠</span>
+                                <SafeRenderer data={weakness} />
+                              </li>
+                            ))}
+                          </ul>
+                        </div>
+                      )}
+                    </div>
+
+                    {/* Evidence Text (small preview) */}
+                    {methodology.evidence_text && (
+                      <div className="text-xs text-gray-600 italic border-t border-gray-200 pt-2 mt-2">
+                        <span className="font-semibold">Evidence: </span>
+                        <SafeRenderer data={methodology.evidence_text.substring(0, 150) + (methodology.evidence_text.length > 150 ? '...' : '')} />
+                      </div>
+                    )}
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* Traditional Study Design (fallback if no methodologies detected) */}
+          {methodologies.length === 0 && data?.study_design && (
+            <div>
+              <h4 className="font-semibold text-gray-800 mb-2">Study Design</h4>
+              <SafeRenderer data={data.study_design} className="text-sm text-gray-600" />
+            </div>
+          )}
+
+          {data?.methodological_strengths && Array.isArray(data.methodological_strengths) && data.methodological_strengths.length > 0 && (
+            <div>
+              <h4 className="font-semibold text-green-800 mb-2">Strengths</h4>
+              <ul className="space-y-1">
+                {data.methodological_strengths.slice(0, 3).map((strength: any, index: number) => (
+                  <li key={index} className="text-sm text-green-700 flex items-start">
+                    <span className="text-green-500 mr-2">✓</span>
+                    <SafeRenderer data={strength} />
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
+
+          {data?.methodological_weaknesses && Array.isArray(data.methodological_weaknesses) && data.methodological_weaknesses.length > 0 && (
+            <div>
+              <h4 className="font-semibold text-red-800 mb-2">Weaknesses</h4>
+              <ul className="space-y-1">
+                {data.methodological_weaknesses.slice(0, 3).map((weakness: any, index: number) => (
+                  <li key={index} className="text-sm text-red-700 flex items-start">
+                    <span className="text-red-500 mr-2">⚠</span>
+                    <SafeRenderer data={weakness} />
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
+
+          {data?.methodology_quality_rating && (
+            <div className="bg-gray-50 p-3 rounded">
+              <h4 className="font-semibold text-gray-800 mb-1">Quality Rating</h4>
+              <span className={`px-2 py-1 text-xs rounded ${
+                String(data.methodology_quality_rating).toLowerCase().includes('high') ? 'bg-green-100 text-green-800' :
+                String(data.methodology_quality_rating).toLowerCase().includes('medium') ? 'bg-yellow-100 text-yellow-800' :
+                'bg-red-100 text-red-800'
+              }`}>
+                <SafeRenderer data={data.methodology_quality_rating} />
+              </span>
+            </div>
+          )}
+        </div>
+      </ErrorBoundary>
+    );
+  };
 
   const renderBiasAnalysis = () => (
     <ErrorBoundary>

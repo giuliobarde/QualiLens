@@ -15,9 +15,10 @@ from datetime import datetime
 from .base_agent import BaseAgent, AgentResponse
 from ..question_classifier import ClassificationResult, QueryType
 
-# Import enhanced scorer
+# Import scorers
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from enhanced_scorer import EnhancedScorer
+from evidence_based_scorer import EvidenceBasedScorer
 from ..evidence_collector import EvidenceCollector
 
 logger = logging.getLogger(__name__)
@@ -118,6 +119,7 @@ class PaperAnalysisAgent(BaseAgent):
             text_content = None
             pdf_metadata = None
             pdf_pages = None
+            pages_with_coords = None
             evidence_collector = None
             
             # Check if we have a file path to parse (from upload or query)
@@ -145,11 +147,20 @@ class PaperAnalysisAgent(BaseAgent):
                         # Fallback: split text into pages if not available
                         pdf_pages = text_content.split("\n\n")[:50]  # Limit to 50 pages
                         logger.info(f"Using fallback page splitting: {len(pdf_pages)} pages")
+                    
+                    # Extract coordinate data for evidence highlighting
+                    if "pages_with_coords" in pdf_result:
+                        pages_with_coords = pdf_result["pages_with_coords"]
+                        logger.info(f"Extracted coordinate data for {len(pages_with_coords)} pages")
+                    
                     tools_used.append("parse_pdf")
             
             # Initialize evidence collector if we have PDF pages
             if pdf_pages:
-                evidence_collector = EvidenceCollector(pdf_pages=pdf_pages)
+                evidence_collector = EvidenceCollector(
+                    pdf_pages=pdf_pages,
+                    pages_with_coords=pages_with_coords
+                )
             
             # If no text content from PDF parsing, try to get it from other sources
             if not text_content:
@@ -296,7 +307,8 @@ class PaperAnalysisAgent(BaseAgent):
             statistical_result = self.execute_tool(
                 "statistical_validator_tool",
                 text_content=text_content,
-                validation_level="comprehensive"
+                validation_level="comprehensive",
+                evidence_collector=evidence_collector
             )
             if statistical_result.get("success"):
                 results["statistical_analysis"] = statistical_result
@@ -397,11 +409,24 @@ class PaperAnalysisAgent(BaseAgent):
                 logger.info(f"   - cached: {methodology_data.get('cached', False)}")
                 logger.info(f"   - content_hash: {methodology_data.get('content_hash', 'N/A')}")
 
+                # NEW: Extract detected methodologies
+                detected_methodologies = methodology_data.get("detected_methodologies", {})
+                methodologies_list = detected_methodologies.get("methodologies", [])
+                logger.info(f"   - detected_methodologies: {len(methodologies_list)} methodologies")
+                for i, meth in enumerate(methodologies_list[:3]):  # Log first 3
+                    logger.info(f"      {i+1}. {meth.get('type', 'Unknown')} - {meth.get('category', 'unknown')} - Quality: {meth.get('quality_assessment', {}).get('quality_rating', 'N/A')}")
+
                 integrated_result["study_design"] = methodology_data.get("study_design", "")
                 integrated_result["sample_characteristics"] = methodology_data.get("sample_characteristics", {})
                 integrated_result["methodological_strengths"] = methodology_data.get("methodological_strengths", [])
                 integrated_result["methodological_weaknesses"] = methodology_data.get("methodological_weaknesses", [])
                 integrated_result["methodology_quality_rating"] = methodology_data.get("quality_rating", "")
+
+                # NEW: Add detected methodologies to result
+                integrated_result["detected_methodologies"] = detected_methodologies
+                integrated_result["primary_methodology"] = detected_methodologies.get("primary_methodology", "Unknown")
+                integrated_result["methodology_combination_assessment"] = detected_methodologies.get("methodology_combination_assessment", "")
+                integrated_result["overall_methodological_approach"] = detected_methodologies.get("overall_methodological_approach", "")
 
                 # Add cache metadata for transparency
                 integrated_result["scoring_metadata"] = {
@@ -469,11 +494,63 @@ class PaperAnalysisAgent(BaseAgent):
                 integrated_result["quality_confidence_level"] = quality_data.get("confidence_level", "")
                 integrated_result["scoring_criteria_used"] = quality_data.get("scoring_criteria_used", [])
 
-            # PHASE 2: Apply Enhanced Scoring (reproducibility, bias, research gaps)
-            logger.info("🎯 Applying Phase 2 Enhanced Scoring")
+            # PHASE 2: Apply Evidence-Based Scoring
+            logger.info("🎯 Applying Evidence-Based Scoring")
             base_score = integrated_result.get("overall_quality_score", 0.0)
 
-            if base_score > 0:
+            # Get evidence items for scoring
+            evidence_list = []
+            if evidence_collector:
+                evidence_list = evidence_collector.get_all_evidence()
+                logger.info(f"📊 Using {len(evidence_list)} evidence items for scoring")
+
+            if len(evidence_list) > 0:
+                try:
+                    # Use evidence-based scorer
+                    evidence_scorer = EvidenceBasedScorer()
+                    evidence_result = evidence_scorer.calculate_score_from_evidence(
+                        evidence_items=evidence_list,
+                        base_methodology_score=base_score if base_score > 0 else None
+                    )
+
+                    # Update with evidence-based score
+                    integrated_result["overall_quality_score"] = evidence_result["final_score"]
+                    integrated_result["base_methodology_score"] = base_score
+                    integrated_result["component_scores"] = evidence_result["component_scores"]
+                    integrated_result["weighted_contributions"] = evidence_result["weighted_contributions"]
+                    integrated_result["scoring_weights"] = evidence_result["weights"]
+                    integrated_result["evidence_contributions"] = evidence_result.get("evidence_contributions", [])
+                    integrated_result["evidence_count"] = evidence_result.get("evidence_count", 0)
+
+                    logger.info(f"✅ Evidence-based scoring applied:")
+                    logger.info(f"   Methodology: {evidence_result['component_scores']['methodology']} × 60% = {evidence_result['weighted_contributions']['methodology']:.1f} pts")
+                    logger.info(f"   Bias: {evidence_result['component_scores']['bias']} × 20% = {evidence_result['weighted_contributions']['bias']:.1f} pts")
+                    logger.info(f"   Reproducibility: {evidence_result['component_scores']['reproducibility']} × 10% = {evidence_result['weighted_contributions']['reproducibility']:.1f} pts")
+                    logger.info(f"   Statistics: {evidence_result['component_scores']['statistics']} × 10% = {evidence_result['weighted_contributions']['statistics']:.1f} pts")
+                    logger.info(f"   FINAL SCORE: {evidence_result['final_score']:.1f}/100")
+                    logger.info(f"   Evidence items: {len(evidence_list)}")
+
+                except Exception as e:
+                    logger.error(f"Evidence-based scoring failed: {str(e)}")
+                    # Fallback to enhanced scorer if evidence-based fails
+                    if base_score > 0:
+                        try:
+                            enhanced_scorer = EnhancedScorer()
+                            enhanced_result = enhanced_scorer.calculate_final_score(
+                                base_methodology_score=base_score,
+                                text_content=text_content,
+                                reproducibility_data=analysis_results.get("reproducibility_analysis"),
+                                bias_data=analysis_results.get("bias_analysis"),
+                                research_gaps_data=analysis_results.get("research_gap_analysis")
+                            )
+                            integrated_result["overall_quality_score"] = enhanced_result["final_score"]
+                            integrated_result["component_scores"] = enhanced_result["component_scores"]
+                            integrated_result["weighted_contributions"] = enhanced_result["weighted_contributions"]
+                        except Exception as e2:
+                            logger.error(f"Fallback enhanced scoring also failed: {str(e2)}")
+                            logger.info("Continuing with base methodology score")
+            elif base_score > 0:
+                # No evidence collected, use enhanced scorer as fallback
                 try:
                     enhanced_scorer = EnhancedScorer()
                     enhanced_result = enhanced_scorer.calculate_final_score(
@@ -483,21 +560,10 @@ class PaperAnalysisAgent(BaseAgent):
                         bias_data=analysis_results.get("bias_analysis"),
                         research_gaps_data=analysis_results.get("research_gap_analysis")
                     )
-
-                    # Update with enhanced score (weighted component system)
                     integrated_result["overall_quality_score"] = enhanced_result["final_score"]
-                    integrated_result["base_methodology_score"] = base_score
                     integrated_result["component_scores"] = enhanced_result["component_scores"]
                     integrated_result["weighted_contributions"] = enhanced_result["weighted_contributions"]
-                    integrated_result["scoring_weights"] = enhanced_result["weights"]
-
-                    logger.info(f"✅ Enhanced scoring applied (weighted components):")
-                    logger.info(f"   Methodology: {enhanced_result['component_scores']['methodology']} × 60% = {enhanced_result['weighted_contributions']['methodology']:.1f} pts")
-                    logger.info(f"   Bias: {enhanced_result['component_scores']['bias']} × 20% = {enhanced_result['weighted_contributions']['bias']:.1f} pts")
-                    logger.info(f"   Reproducibility: {enhanced_result['component_scores']['reproducibility']} × 10% = {enhanced_result['weighted_contributions']['reproducibility']:.1f} pts")
-                    logger.info(f"   Research Gaps: {enhanced_result['component_scores']['research_gaps']} × 10% = {enhanced_result['weighted_contributions']['research_gaps']:.1f} pts")
-                    logger.info(f"   FINAL SCORE: {enhanced_result['final_score']:.1f}/100")
-
+                    logger.info("⚠️ No evidence collected, using enhanced scorer fallback")
                 except Exception as e:
                     logger.error(f"Enhanced scoring failed: {str(e)}")
                     logger.info("Continuing with base methodology score")

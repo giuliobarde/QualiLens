@@ -94,19 +94,121 @@ class BiasDetectionTool(BaseTool):
             # Collect evidence if evidence_collector is provided
             if evidence_collector:
                 detected_biases = bias_analysis.get("detected_biases", [])
-                for bias in detected_biases:
-                    evidence_collector.add_evidence(
+                logger.info(f"📊 Collecting evidence for {len(detected_biases)} detected biases")
+
+                for idx, bias in enumerate(detected_biases):
+                    # PRIORITY 1: Use the full_section_text (which contains the complete biased section)
+                    evidence_text = bias.get("full_section_text", "")
+
+                    # PRIORITY 2: Use the evidence field or text_excerpt
+                    if not evidence_text or len(evidence_text) < 50:
+                        evidence_text = bias.get("evidence", "")
+
+                    if not evidence_text or len(evidence_text) < 50:
+                        evidence_text = bias.get("text_excerpt", "")
+
+                    # PRIORITY 3: Use description as fallback
+                    if not evidence_text or len(evidence_text) < 50:
+                        evidence_text = bias.get("description", "")
+
+                    # PRIORITY 4 (Last resort): Search for relevant text in the paper
+                    if not evidence_text or len(evidence_text) < 50:
+                        bias_type = bias.get("bias_type", "").lower()
+                        section_name = bias.get("section_name", "")
+
+                        # Search for section name or bias type keywords in content
+                        if text_content:
+                            # Try to find the section in the text
+                            search_terms = []
+                            if section_name:
+                                # Try to find a section header or the section name in the text
+                                search_terms.append(section_name.lower())
+
+                            # Add bias type keywords
+                            keywords = bias_type.split("_") if "_" in bias_type else [bias_type]
+                            search_terms.extend(keywords)
+
+                            for term in search_terms:
+                                if term in text_content.lower():
+                                    # Find context around the term - extract a larger section
+                                    idx_pos = text_content.lower().find(term)
+                                    start = max(0, idx_pos - 300)
+                                    end = min(len(text_content), idx_pos + 700)
+                                    evidence_text = text_content[start:end].strip()
+                                    logger.info(f"   Found evidence for bias {idx+1} using search term '{term}' (extracted {len(evidence_text)} chars)")
+                                    break
+
+                    # Log the source and length of evidence text
+                    if bias.get("full_section_text"):
+                        logger.info(f"   Using full_section_text for bias {idx+1} ({len(evidence_text)} characters)")
+                    elif bias.get("evidence"):
+                        logger.info(f"   Using evidence field for bias {idx+1} ({len(evidence_text)} characters)")
+                    else:
+                        logger.info(f"   Using fallback text for bias {idx+1} ({len(evidence_text)} characters)")
+
+                    # Calculate score impact based on severity
+                    severity = bias.get("severity", "medium")
+                    if severity == "high":
+                        score_impact = -25.0
+                        confidence = 0.85
+                    elif severity == "medium":
+                        score_impact = -12.0
+                        confidence = 0.70
+                    else:
+                        score_impact = -6.0
+                        confidence = 0.60
+
+                    # Additional penalty for critical bias types
+                    bias_type = bias.get("bias_type", "").lower()
+                    if any(bt in bias_type for bt in ["selection", "confounding", "publication"]):
+                        score_impact -= 5.0
+                        logger.info(f"   Applied additional penalty for critical bias type: {bias_type}")
+
+                    # Build comprehensive rationale using chain-of-thought reasoning
+                    section_name = bias.get("section_name", "Unknown section")
+                    verification_reasoning = bias.get("verification_reasoning", "")
+                    why_bias = bias.get("why_bias_not_limitation", "")
+                    impact = bias.get("impact", "")
+
+                    # Construct detailed rationale
+                    rationale_parts = [f"Bias detected in section: {section_name}"]
+
+                    if verification_reasoning:
+                        rationale_parts.append(f"Reasoning: {verification_reasoning}")
+
+                    if why_bias:
+                        rationale_parts.append(f"Why this is bias (not limitation): {why_bias}")
+
+                    if impact:
+                        rationale_parts.append(f"Impact: {impact}")
+
+                    full_rationale = " | ".join(rationale_parts)
+
+                    # Add evidence to collector
+                    # Don't truncate if we have full_section_text - preserve the complete context
+                    max_snippet_length = 1500 if bias.get("full_section_text") else 400
+                    text_to_add = evidence_text[:max_snippet_length] if evidence_text else bias.get("description", "")[:400]
+
+                    # Add ellipsis if truncated
+                    if evidence_text and len(evidence_text) > max_snippet_length:
+                        text_to_add = text_to_add + "... [truncated for display]"
+                        logger.info(f"   ⚠️  Evidence text truncated from {len(evidence_text)} to {max_snippet_length} chars for bias {idx+1}")
+
+                    evidence_id = evidence_collector.add_evidence(
                         category="bias",
-                        text_snippet=bias.get("evidence", bias.get("description", "")),
-                        rationale=bias.get("verification_reasoning", bias.get("description", "")),
-                        severity=bias.get("severity", "medium"),
-                        confidence=0.8 if bias.get("severity") == "high" else 0.6,
-                        score_impact=-20.0 if bias.get("severity") == "high" else -10.0
+                        text_snippet=text_to_add,
+                        rationale=full_rationale[:1200],  # Increased length for chain-of-thought
+                        severity=severity,
+                        confidence=confidence,
+                        score_impact=score_impact
                     )
+
+                    logger.info(f"✅ Added evidence {evidence_id} for bias: {section_name} ({bias_type}, {severity} severity, impact: {score_impact:.1f}, text_length: {len(text_to_add)} chars)")
             
             return {
                 "success": True,
                 "detected_biases": bias_analysis.get("detected_biases", []),
+                "rejected_sections": bias_analysis.get("rejected_sections", bias_analysis.get("rejected_biases", [])),
                 "bias_summary": bias_analysis.get("bias_summary", ""),
                 "limitations": bias_analysis.get("limitations", []),
                 "confounding_factors": bias_analysis.get("confounding_factors", []),
@@ -127,123 +229,192 @@ class BiasDetectionTool(BaseTool):
     
     def _detect_biases(self, text_content: str, bias_types: List[str], severity_threshold: str) -> Dict[str, Any]:
         """
-        Detect various types of biases in the research paper using two-step chain-of-thought reasoning.
+        Detect various types of biases in the research paper using a comprehensive two-phase approach.
 
-        Step 1: Brainstorm potential biases (creative, temperature > 0)
-        Step 2: Verify and analyze each potential bias (deterministic, temperature = 0)
+        PHASE 1: Section-Level Analysis
+        - Analyze the entire paper to identify sections that could potentially contain biases
+        - Break down the paper into meaningful sections (methodology, results, discussion, etc.)
+        - Flag sections that show indicators of potential bias
+
+        PHASE 2: Detailed Verification with Chain-of-Thought
+        - For each flagged section, perform detailed verification
+        - Determine whether the section actually contains bias
+        - Provide explicit reasoning for why it is or isn't biased
+        - Include specific evidence and impact assessment
         """
         try:
-            # STEP 1: Brainstorm potential biases (more creative)
-            logger.info("Step 1: Brainstorming potential biases...")
-            brainstorm_prompt = f"""
-You are an expert research methodologist specializing in bias detection. Your task is to BRAINSTORM potential biases in this research paper.
+            # PHASE 1: Identify potentially biased sections across the paper
+            logger.info("🔍 PHASE 1: Identifying potentially biased sections across the paper...")
+
+            section_analysis_prompt = f"""
+You are an expert research methodologist. Your task is to analyze this research paper and identify SECTIONS that potentially contain biases.
 
 PAPER CONTENT:
-{text_content[:6000]}
+{text_content[:8000]}
 
-BIAS TYPES TO CONSIDER: {', '.join(bias_types)}
+BIAS TYPES TO DETECT: {', '.join(bias_types)}
 
-BRAINSTORMING INSTRUCTIONS:
-- Be thorough and creative in identifying POTENTIAL biases
-- This is a brainstorming phase - include anything that MIGHT be a bias
-- Provide your reasoning for why each item might be a bias
-- Include edge cases and subtle biases
-- Don't worry about false positives at this stage
+PHASE 1 INSTRUCTIONS - SECTION-LEVEL ANALYSIS:
+Your goal is to scan through the ENTIRE paper and identify specific sections or passages that may contain biases.
 
-For each potential bias, think through:
-1. What aspect of the study suggests this bias?
-2. What is the specific evidence?
-3. How would this bias affect the results if it exists?
+CRITICAL: For each potentially biased section, you must extract the COMPLETE text of that section so readers can see the full context.
 
-Provide your brainstorming in JSON format:
+For each potentially biased section, provide:
+1. The section name/location (e.g., "Methods - Sampling", "Results - Statistical Analysis", "Discussion - Interpretation")
+2. The FULL TEXT of the entire section or paragraph that contains the bias (100-500 words minimum - include complete context)
+3. The type of bias you suspect (selection, measurement, confounding, publication, reporting)
+4. Initial red flags that suggest this section might be biased
+5. Preliminary severity estimate
+
+Think systematically through these areas:
+- **Abstract & Introduction**: Claims, framing, literature review completeness
+- **Methods**:
+  - Sampling methods and participant selection
+  - Measurement instruments and procedures
+  - Randomization and control procedures
+  - Statistical analysis choices
+- **Results**:
+  - Selective reporting of outcomes
+  - Statistical presentation and interpretation
+  - Missing data handling
+- **Discussion**:
+  - Interpretation of findings
+  - Acknowledgment of limitations
+  - Generalization claims
+- **Overall**: Conflicts of interest, funding influence, missing information
+
+Provide your analysis in JSON format:
 {{
-  "potential_biases": [
+  "potentially_biased_sections": [
     {{
-      "bias_type": "selection_bias | measurement_bias | confounding_bias | publication_bias | reporting_bias",
-      "initial_assessment": "Why you think this MIGHT be a bias",
-      "evidence_snippet": "Specific quote or aspect from the paper",
-      "potential_severity": "low | medium | high",
-      "reasoning": "Your chain-of-thought reasoning"
+      "section_name": "Name/location of the section (e.g., 'Methods - Participant Selection')",
+      "full_section_text": "COMPLETE TEXT of the entire section/paragraph containing the bias (100-500 words). Include full context so readers can understand the complete picture.",
+      "suspected_bias_type": "selection_bias | measurement_bias | confounding_bias | publication_bias | reporting_bias",
+      "red_flags": ["List of specific indicators that suggest bias"],
+      "preliminary_severity": "low | medium | high",
+      "page_hint": "Rough location in paper (beginning, middle, end, or specific keyword)",
+      "initial_reasoning": "Brief explanation of why this section is flagged"
     }}
   ]
 }}
 
 BIAS DETECTION GUIDELINES:
-1. Selection Bias: Non-random sampling, exclusion criteria, recruitment methods, sample representativeness
-2. Measurement Bias: Measurement errors, instrument bias, observer bias, recall bias, social desirability
-3. Confounding Bias: Uncontrolled variables, lack of randomization, missing covariates
-4. Publication Bias: Selective reporting, missing negative results, outcome switching
-5. Reporting Bias: Incomplete reporting, selective outcome reporting, data dredging
+1. **Selection Bias**: Non-random sampling, unclear inclusion/exclusion criteria, convenience sampling, volunteer bias, survival bias
+2. **Measurement Bias**: Self-reported data without validation, leading questions, observer bias, instrument calibration issues, recall bias
+3. **Confounding Bias**: Lack of control group, uncontrolled confounding variables, missing covariates, inadequate matching
+4. **Publication Bias**: Selective outcome reporting, post-hoc analysis, p-hacking indicators, missing negative results
+5. **Reporting Bias**: Incomplete methods, missing data, selective emphasis, data dredging, HARKing (Hypothesizing After Results Known)
 
-Be comprehensive - we'll verify these in the next step.
+IMPORTANT: Extract the FULL SECTION TEXT for each potential bias. Users need to see the complete context, not just a snippet.
+
+Be thorough - scan the entire paper systematically. Look for what's MISSING as well as what's present.
 """
 
-            # Step 1: Creative brainstorming with temperature=0.3
-            brainstorm_response = self._get_openai_client().generate_completion(
-                prompt=brainstorm_prompt,
+            # Phase 1: Section identification with moderate temperature for thoroughness
+            section_response = self._get_openai_client().generate_completion(
+                prompt=section_analysis_prompt,
                 model="gpt-3.5-turbo",
-                max_tokens=2000,
-                temperature=0.3  # Some creativity for brainstorming
+                max_tokens=3000,
+                temperature=0.2  # Low temperature for systematic analysis
             )
 
-            if not brainstorm_response:
-                return {"error": "No response from Step 1 (brainstorming)"}
+            if not section_response:
+                logger.error("❌ PHASE 1 failed: No response from LLM")
+                return {"error": "No response from Phase 1 (section analysis)"}
 
             try:
-                brainstormed = json.loads(brainstorm_response)
-                potential_biases = brainstormed.get("potential_biases", [])
-                logger.info(f"Step 1 complete: {len(potential_biases)} potential biases identified")
-            except json.JSONDecodeError:
-                logger.error("Failed to parse brainstorming response")
-                return {"error": "Failed to parse brainstorming results"}
+                phase1_result = json.loads(section_response)
+                potentially_biased_sections = phase1_result.get("potentially_biased_sections", [])
+                logger.info(f"✅ PHASE 1 complete: {len(potentially_biased_sections)} potentially biased sections identified")
 
-            # STEP 2: Verify and analyze each potential bias (deterministic)
-            logger.info("Step 2: Verifying and analyzing potential biases...")
+                # Log details of flagged sections
+                for idx, section in enumerate(potentially_biased_sections):
+                    logger.info(f"   Section {idx+1}: {section.get('section_name')} - {section.get('suspected_bias_type')} ({section.get('preliminary_severity')} severity)")
+
+            except json.JSONDecodeError as e:
+                logger.error(f"❌ Failed to parse Phase 1 response: {str(e)}")
+                logger.error(f"Response was: {section_response[:500]}")
+                return {"error": "Failed to parse section analysis results"}
+
+            if not potentially_biased_sections:
+                logger.info("✅ No potentially biased sections identified - paper appears clean")
+                return {
+                    "detected_biases": [],
+                    "rejected_biases": [],
+                    "bias_summary": "No significant biases detected in the paper.",
+                    "limitations": [],
+                    "confounding_factors": [],
+                    "severity_scores": {bt: "none" for bt in bias_types},
+                    "recommendations": []
+                }
+
+            # PHASE 2: Detailed verification with chain-of-thought reasoning
+            logger.info(f"🔍 PHASE 2: Verifying {len(potentially_biased_sections)} potentially biased sections...")
+
             verification_prompt = f"""
-You are a rigorous research quality assessor. You will now VERIFY each potential bias identified in the brainstorming phase.
+You are a rigorous research quality assessor. You will now VERIFY each potentially biased section identified in Phase 1.
 
 PAPER CONTENT:
-{text_content[:6000]}
+{text_content[:8000]}
 
-POTENTIAL BIASES TO VERIFY:
-{json.dumps(potential_biases, indent=2)}
+POTENTIALLY BIASED SECTIONS TO VERIFY:
+{json.dumps(potentially_biased_sections, indent=2)}
 
 SEVERITY THRESHOLD: {severity_threshold}
 
-VERIFICATION INSTRUCTIONS:
-For each potential bias, you must:
-1. Carefully examine the evidence
-2. Determine if it is a TRUE bias or a false positive
-3. If it's a true bias, assess its severity and impact
-4. Provide clear justification for your decision
+PHASE 2 INSTRUCTIONS - DETAILED VERIFICATION WITH CHAIN-OF-THOUGHT:
 
-Use chain-of-thought reasoning:
-- ANALYZE: What does the evidence actually show?
-- EVALUATE: Is this a genuine bias or a limitation?
-- ASSESS: If it's a bias, how severe is it?
-- CONCLUDE: Should this be included in the final list?
+For EACH potentially biased section, you must:
+
+1. **RE-EXAMINE THE EVIDENCE**: Look at the full section text and context
+2. **APPLY CHAIN-OF-THOUGHT REASONING**:
+   - ANALYZE: What does the evidence actually show? What are the facts?
+   - CONTEXT: What is the research context? What are acceptable practices in this field?
+   - EVALUATE: Is this a genuine methodological bias, or is it a reasonable limitation/trade-off?
+   - SEVERITY: If it IS a bias, how severely does it compromise the study's validity?
+   - IMPACT: What specific effects does this bias have on the results and conclusions?
+3. **MAKE A DECISION**: Is this section ACTUALLY biased or not?
+4. **PROVIDE EXPLICIT REASONING**: Explain your decision step-by-step
+
+CRITICAL REJECTION THRESHOLD:
+- Only REJECT a potential bias if you are >90% CONFIDENT it is NOT a bias
+- When in doubt, keep the bias and explain the uncertainty in your reasoning
+- It's better to flag something for human review than to miss a real bias
+- If confidence is 50-90% that it's a bias, KEEP IT as detected bias with appropriate severity
+
+IMPORTANT DISTINCTIONS:
+- **Bias** = Systematic error that skews results in a particular direction
+- **Limitation** = Constraint or weakness that doesn't necessarily create directional error
+- **Trade-off** = Methodological choice with pros and cons
 
 Provide your verification in JSON format:
 {{
   "detected_biases": [
     {{
-      "bias_type": "type from potential list",
-      "description": "Clear description of the confirmed bias",
-      "evidence": "Specific evidence from the paper",
+      "section_name": "Name of the section (from Phase 1)",
+      "bias_type": "selection_bias | measurement_bias | confounding_bias | publication_bias | reporting_bias",
+      "description": "Clear, specific description of the confirmed bias",
+      "full_section_text": "The COMPLETE text from Phase 1's full_section_text field - preserve this exactly",
+      "evidence": "Specific quotes highlighting the bias within the full text",
       "severity": "low | medium | high",
-      "impact": "How this bias affects the study's validity and results",
-      "verification_reasoning": "Your chain-of-thought for why this IS a genuine bias"
+      "impact": "Specific explanation of how this bias affects the study's validity and results",
+      "verification_reasoning": "DETAILED chain-of-thought explanation of WHY this IS a genuine bias (not just a limitation)",
+      "why_bias_not_limitation": "Explicit explanation of why this is a bias and not merely a study limitation",
+      "confidence_percentage": 50-100 (your confidence level that this IS a bias)
     }}
   ],
-  "rejected_biases": [
+  "rejected_sections": [
     {{
-      "bias_type": "type from potential list",
-      "rejection_reasoning": "Why this is NOT a genuine bias after verification"
+      "section_name": "Name of the section (from Phase 1)",
+      "suspected_bias_type": "Type that was suspected",
+      "rejection_reasoning": "DETAILED chain-of-thought explanation of WHY you are >90% confident this is NOT a genuine bias",
+      "alternative_classification": "What this actually is (e.g., 'acceptable limitation', 'methodological trade-off', 'false positive')",
+      "confidence_percentage": 90-100 (must be >90 to reject)
     }}
   ],
-  "bias_summary": "Overall summary of confirmed biases",
-  "limitations": ["Study limitations that are not biases"],
-  "confounding_factors": ["Uncontrolled variables that could affect results"],
+  "bias_summary": "Overall summary of confirmed biases and their collective impact",
+  "limitations": ["Study limitations that are NOT biases (important for transparency)"],
+  "confounding_factors": ["Specific uncontrolled variables that could affect results"],
   "severity_scores": {{
     "selection_bias": "none | low | medium | high",
     "measurement_bias": "none | low | medium | high",
@@ -251,44 +422,78 @@ Provide your verification in JSON format:
     "publication_bias": "none | low | medium | high",
     "reporting_bias": "none | low | medium | high"
   }},
-  "recommendations": ["Recommendations to address the confirmed biases"]
+  "recommendations": ["Specific, actionable recommendations to address each confirmed bias"]
 }}
 
 VERIFICATION STANDARDS:
-- Only include biases that meet or exceed the severity threshold: {severity_threshold}
-- Be conservative - when in doubt, explain why in rejected_biases
-- Provide specific evidence, not speculation
-- Distinguish between biases and general limitations
+- Only confirm biases that meet or exceed the severity threshold: {severity_threshold}
+- ONLY REJECT if >90% confident it's NOT a bias - when in doubt, keep it
+- Distinguish clearly between biases, limitations, and methodological choices
+- PRESERVE the full_section_text from Phase 1 in detected_biases so users can see complete context
+- Provide specific evidence with quotes when possible
+- Consider field-specific norms and constraints
+- Think about practical research constraints vs. actual bias
+
+CHAIN-OF-THOUGHT TEMPLATE for each section:
+1. "The evidence shows..."
+2. "In the context of this research..."
+3. "This is/is not a bias because..."
+4. "My confidence level is X% because..."
+5. "The severity is X because..."
+6. "The impact on results is..."
+7. "Therefore, my conclusion is..."
+
+REMEMBER: Be conservative in rejecting - only reject if >90% certain it's not a bias!
 """
 
-            # Step 2: Deterministic verification with temperature=0.0
+            # Phase 2: Rigorous verification with deterministic reasoning
             verification_response = self._get_openai_client().generate_completion(
                 prompt=verification_prompt,
                 model="gpt-3.5-turbo",
-                max_tokens=2500,
-                temperature=0.0  # Deterministic for consistency
+                max_tokens=4000,
+                temperature=0.0  # Deterministic for consistent, rigorous verification
             )
 
-            if verification_response:
-                try:
-                    result = json.loads(verification_response)
-                    logger.info(f"Step 2 complete: {len(result.get('detected_biases', []))} biases confirmed, {len(result.get('rejected_biases', []))} rejected")
-                    return result
-                except json.JSONDecodeError:
-                    logger.error("Failed to parse verification response")
-                    # Fallback if JSON parsing fails
-                    return {
-                        "detected_biases": [],
-                        "rejected_biases": [],
-                        "bias_summary": verification_response,
-                        "limitations": [],
-                        "confounding_factors": [],
-                        "severity_scores": {},
-                        "recommendations": []
-                    }
-            else:
-                return {"error": "No response from Step 2 (verification)"}
+            if not verification_response:
+                logger.error("❌ PHASE 2 failed: No response from LLM")
+                return {"error": "No response from Phase 2 (verification)"}
+
+            try:
+                result = json.loads(verification_response)
+                confirmed_biases = result.get("detected_biases", [])
+                rejected_sections = result.get("rejected_biases", []) or result.get("rejected_sections", [])
+
+                logger.info(f"✅ PHASE 2 complete:")
+                logger.info(f"   - {len(confirmed_biases)} biases CONFIRMED")
+                logger.info(f"   - {len(rejected_sections)} sections REJECTED (not biases)")
+
+                # Log details of confirmed biases
+                for idx, bias in enumerate(confirmed_biases):
+                    logger.info(f"   Confirmed Bias {idx+1}: {bias.get('section_name')} - {bias.get('bias_type')} ({bias.get('severity')} severity)")
+
+                # Log details of rejected sections
+                for idx, rejected in enumerate(rejected_sections):
+                    logger.info(f"   Rejected {idx+1}: {rejected.get('section_name')} - {rejected.get('alternative_classification', 'not a bias')}")
+
+                return result
+
+            except json.JSONDecodeError as e:
+                logger.error(f"❌ Failed to parse Phase 2 response: {str(e)}")
+                logger.error(f"Response was: {verification_response[:500]}")
+                # Fallback if JSON parsing fails
+                return {
+                    "detected_biases": [],
+                    "rejected_biases": [],
+                    "bias_summary": verification_response[:1000],  # Include partial response
+                    "limitations": [],
+                    "confounding_factors": [],
+                    "severity_scores": {},
+                    "recommendations": [],
+                    "error": "Failed to parse verification response"
+                }
 
         except Exception as e:
-            logger.error(f"Bias detection analysis failed: {str(e)}")
+            logger.error(f"❌ Bias detection analysis failed: {str(e)}")
+            import traceback
+            logger.error(traceback.format_exc())
             return {"error": str(e)}

@@ -33,7 +33,11 @@ def create_app():
     app.config['UPLOAD_FOLDER'] = '/tmp/qualilens_uploads'
     
     # Enable CORS for frontend communication
-    CORS(app, origins=['http://localhost:3000', 'http://localhost:3001'], supports_credentials=True)
+    CORS(app, 
+         origins=['http://localhost:3000', 'http://localhost:3001', 'http://127.0.0.1:3000', 'http://127.0.0.1:3001'],
+         methods=['GET', 'POST', 'OPTIONS'],
+         allow_headers=['Content-Type', 'Authorization'],
+         supports_credentials=True)
     
     # Register API routes
     app.add_url_rule('/api/agent/query', 'agent_query', agent_query, methods=['POST'])

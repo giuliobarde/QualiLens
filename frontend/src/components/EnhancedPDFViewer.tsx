@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useRef, useState, useCallback } from 'react';
+import { useEffect, useRef, useState, useCallback, useMemo } from 'react';
 import * as pdfjsLib from 'pdfjs-dist';
 
 // Configure PDF.js worker - use a stable known version from CDN or fallback to local
@@ -70,20 +70,52 @@ export default function EnhancedPDFViewer({
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [hoveredEvidenceId, setHoveredEvidenceId] = useState<string | null>(null);
-  const [pageRendering, setPageRendering] = useState<Set<number>>(new Set());
+  const [hoveredEvidence, setHoveredEvidence] = useState<EvidenceItem | null>(null);
+  const [hoverPosition, setHoverPosition] = useState<{ x: number; y: number } | null>(null);
+  const pageRenderingRef = useRef<Set<number>>(new Set());
 
-  // Filter evidence by category
-  const filteredEvidence = categoryFilter === 'all'
-    ? evidenceTraces
-    : evidenceTraces.filter(e => e.category === categoryFilter);
+  // Filter evidence by category - use useMemo to prevent recreation on every render
+  const filteredEvidence = useMemo(() => {
+    return categoryFilter === 'all'
+      ? evidenceTraces
+      : evidenceTraces.filter(e => e.category === categoryFilter);
+  }, [evidenceTraces, categoryFilter]);
 
-  // Group evidence by page
-  const evidenceByPage = filteredEvidence.reduce((acc, evidence) => {
-    const page = evidence.page_number || 1;
-    if (!acc[page]) acc[page] = [];
-    acc[page].push(evidence);
-    return acc;
-  }, {} as Record<number, EvidenceItem[]>);
+  // Group evidence by page - use useMemo to prevent recreation on every render
+  const evidenceByPage = useMemo(() => {
+    return filteredEvidence.reduce((acc, evidence) => {
+      const page = evidence.page_number || 1;
+      if (!acc[page]) acc[page] = [];
+      acc[page].push(evidence);
+      return acc;
+    }, {} as Record<number, EvidenceItem[]>);
+  }, [filteredEvidence]);
+
+  // Debug evidence data
+  useEffect(() => {
+    console.log('🔍 EnhancedPDFViewer Evidence Debug:');
+    console.log('- Total evidence traces:', evidenceTraces.length);
+    console.log('- Filtered evidence:', filteredEvidence.length);
+    
+    const pageSummary = Object.keys(evidenceByPage).map(p => {
+      const pageNum = Number(p);
+      return { page: pageNum, count: evidenceByPage[pageNum].length, evidenceIds: evidenceByPage[pageNum].map(e => e.id) };
+    });
+    console.log('- Evidence by page:', pageSummary);
+    console.log('- Pages with evidence:', pageSummary.map(p => p.page).sort((a, b) => a - b));
+    
+    // Show detailed breakdown
+    filteredEvidence.forEach((ev, idx) => {
+      console.log(`- Evidence ${idx + 1}/${filteredEvidence.length}:`, {
+        id: ev.id,
+        category: ev.category,
+        page: ev.page_number,
+        hasBbox: !!ev.bounding_box,
+        bbox: ev.bounding_box,
+        textSnippet: ev.text_snippet?.substring(0, 80)
+      });
+    });
+  }, [evidenceTraces, filteredEvidence, evidenceByPage]);
 
   // Load PDF
   useEffect(() => {
@@ -127,30 +159,98 @@ export default function EnhancedPDFViewer({
     loadPDF();
   }, [pdfUrl]);
 
-  // Render highlights for a page
+  // Render highlights for a page - use useCallback with stable dependencies
   const renderHighlights = useCallback((pageNum: number, pageWidth: number, pageHeight: number) => {
     const highlightCanvas = highlightCanvasRefs.current.get(pageNum);
-    if (!highlightCanvas) return;
+    if (!highlightCanvas) {
+      console.warn(`⚠️ No highlight canvas for page ${pageNum}`);
+      return;
+    }
 
     const ctx = highlightCanvas.getContext('2d');
-    if (!ctx) return;
+    if (!ctx) {
+      console.warn(`⚠️ Could not get 2d context for highlight canvas on page ${pageNum}`);
+      return;
+    }
+
+    // Set canvas size first
+    highlightCanvas.width = pageWidth;
+    highlightCanvas.height = pageHeight;
 
     // Clear previous highlights
     ctx.clearRect(0, 0, highlightCanvas.width, highlightCanvas.height);
 
-    highlightCanvas.width = pageWidth;
-    highlightCanvas.height = pageHeight;
-
     const pageEvidence = evidenceByPage[pageNum] || [];
+    
+    console.log(`🎨 Rendering highlights for page ${pageNum}:`, {
+      pageWidth,
+      pageHeight,
+      evidenceCount: pageEvidence.length,
+      evidenceIds: pageEvidence.map(e => e.id)
+    });
+    
+    if (pageEvidence.length === 0) {
+      console.log(`ℹ️ No evidence for page ${pageNum}`);
+      return;
+    }
 
-    pageEvidence.forEach((evidence) => {
+    let renderedCount = 0;
+    let skippedCount = 0;
+
+    pageEvidence.forEach((evidence, idx) => {
       const bbox = evidence.bounding_box;
-      if (!bbox) return;
+      if (!bbox) {
+        console.warn(`⚠️ Evidence ${evidence.id} on page ${pageNum} has no bounding box`);
+        skippedCount++;
+        return;
+      }
+
+      // Validate bounding box values
+      if (typeof bbox.x !== 'number' || typeof bbox.y !== 'number' || 
+          typeof bbox.width !== 'number' || typeof bbox.height !== 'number') {
+        console.warn(`⚠️ Evidence ${evidence.id} on page ${pageNum} has invalid bbox types:`, bbox);
+        skippedCount++;
+        return;
+      }
 
       const x = bbox.x * pageWidth;
       const y = bbox.y * pageHeight;
       const width = bbox.width * pageWidth;
       const height = bbox.height * pageHeight;
+
+      // Validate coordinates
+      if (isNaN(x) || isNaN(y) || isNaN(width) || isNaN(height)) {
+        console.warn(`⚠️ Evidence ${evidence.id} on page ${pageNum} has NaN coordinates:`, { x, y, width, height });
+        skippedCount++;
+        return;
+      }
+
+      // Validate coordinates are within reasonable bounds
+      if (x < 0 || y < 0 || width <= 0 || height <= 0 || 
+          x + width > pageWidth * 1.1 || y + height > pageHeight * 1.1) {
+        console.warn(`⚠️ Evidence ${evidence.id} on page ${pageNum} has out-of-bounds coordinates:`, {
+          x, y, width, height, pageWidth, pageHeight
+        });
+        // Still render, but clamp to bounds
+        const clampedX = Math.max(0, Math.min(x, pageWidth - 10));
+        const clampedY = Math.max(0, Math.min(y, pageHeight - 10));
+        const clampedWidth = Math.min(width, pageWidth - clampedX);
+        const clampedHeight = Math.min(height, pageHeight - clampedY);
+        
+        if (clampedWidth > 0 && clampedHeight > 0) {
+          const colors = getCategoryColor(evidence.category);
+          ctx.fillStyle = colors.fill;
+          ctx.fillRect(clampedX, clampedY, clampedWidth, clampedHeight);
+          ctx.strokeStyle = colors.stroke;
+          ctx.lineWidth = 1;
+          ctx.strokeRect(clampedX, clampedY, clampedWidth, clampedHeight);
+          renderedCount++;
+          console.log(`✅ Rendered clamped highlight for evidence ${evidence.id} on page ${pageNum}`);
+        } else {
+          skippedCount++;
+        }
+        return;
+      }
 
       const colors = getCategoryColor(evidence.category);
       const isSelected = selectedEvidenceId === evidence.id;
@@ -172,14 +272,22 @@ export default function EnhancedPDFViewer({
         ctx.strokeRect(x, y, width, height);
         ctx.shadowBlur = 0;
       }
+
+      renderedCount++;
+      console.log(`✅ Rendered highlight ${idx + 1}/${pageEvidence.length} for evidence ${evidence.id} (${evidence.category}) on page ${pageNum}:`, {
+        bbox: { x: bbox.x, y: bbox.y, width: bbox.width, height: bbox.height },
+        canvasCoords: { x, y, width, height }
+      });
     });
+
+    console.log(`📊 Highlight rendering summary for page ${pageNum}: ${renderedCount} rendered, ${skippedCount} skipped`);
   }, [evidenceByPage, selectedEvidenceId, hoveredEvidenceId]);
 
   // Render a specific page
   const renderPage = useCallback(async (pageNum: number) => {
-    if (!pdf || pageRendering.has(pageNum)) return;
+    if (!pdf || pageRenderingRef.current.has(pageNum)) return;
 
-    setPageRendering(prev => new Set(prev).add(pageNum));
+    pageRenderingRef.current.add(pageNum);
 
     try {
       const page = await pdf.getPage(pageNum);
@@ -187,13 +295,23 @@ export default function EnhancedPDFViewer({
 
       // Render PDF page to canvas
       const canvas = canvasRefs.current.get(pageNum);
-      if (!canvas) return;
+      if (!canvas) {
+        console.warn(`⚠️ No canvas element for page ${pageNum}`);
+        return;
+      }
 
       const context = canvas.getContext('2d');
-      if (!context) return;
+      if (!context) {
+        console.warn(`⚠️ Could not get 2d context for page ${pageNum}`);
+        return;
+      }
 
       canvas.width = viewport.width;
       canvas.height = viewport.height;
+
+      // Set canvas display size to match viewport
+      canvas.style.width = `${viewport.width}px`;
+      canvas.style.height = `${viewport.height}px`;
 
       const renderContext = {
         canvasContext: context,
@@ -202,32 +320,70 @@ export default function EnhancedPDFViewer({
 
       await page.render(renderContext).promise;
 
-      // Render highlights on separate canvas
-      renderHighlights(pageNum, viewport.width, viewport.height);
+      // Get highlight canvas and ensure it matches PDF canvas size
+      const highlightCanvas = highlightCanvasRefs.current.get(pageNum);
+      if (highlightCanvas) {
+        highlightCanvas.width = viewport.width;
+        highlightCanvas.height = viewport.height;
+        highlightCanvas.style.width = `${viewport.width}px`;
+        highlightCanvas.style.height = `${viewport.height}px`;
+        highlightCanvas.style.position = 'absolute';
+        highlightCanvas.style.top = '0';
+        highlightCanvas.style.left = '0';
+      }
 
-      console.log(`✅ Rendered page ${pageNum}`);
+      // Render highlights on separate canvas after a short delay to ensure canvas is ready
+      setTimeout(() => {
+        renderHighlights(pageNum, viewport.width, viewport.height);
+      }, 50);
+
+      console.log(`✅ Rendered page ${pageNum} (${viewport.width}x${viewport.height})`);
     } catch (err) {
       console.error(`❌ Failed to render page ${pageNum}:`, err);
     } finally {
-      setPageRendering(prev => {
-        const newSet = new Set(prev);
-        newSet.delete(pageNum);
-        return newSet;
-      });
+      pageRenderingRef.current.delete(pageNum);
     }
-  }, [pdf, pageRendering, scale, renderHighlights]);
+  }, [pdf, scale, renderHighlights]);
 
   // Re-render highlights when selection or filter changes
   useEffect(() => {
-    if (!pdf) return;
-
-    for (let pageNum = 1; pageNum <= numPages; pageNum++) {
-      const canvas = canvasRefs.current.get(pageNum);
-      if (canvas && canvas.width > 0) {
-        renderHighlights(pageNum, canvas.width, canvas.height);
-      }
+    if (!pdf) {
+      console.log('⏳ Waiting for PDF to load before rendering highlights');
+      return;
     }
-  }, [selectedEvidenceId, hoveredEvidenceId, categoryFilter, filteredEvidence, pdf]);
+
+    console.log('🔄 Re-rendering highlights for all pages:', {
+      numPages,
+      selectedEvidenceId,
+      hoveredEvidenceId,
+      categoryFilter,
+      filteredEvidenceCount: filteredEvidence.length
+    });
+
+    // Use a timeout to batch updates and avoid infinite loops
+    const timeoutId = setTimeout(() => {
+      // Render highlights for all pages that have evidence
+      const pagesWithEvidence = Object.keys(evidenceByPage).map(p => Number(p));
+      console.log(`🎨 Re-rendering highlights for pages with evidence: ${pagesWithEvidence.join(', ')}`);
+      
+      for (let pageNum = 1; pageNum <= numPages; pageNum++) {
+        const canvas = canvasRefs.current.get(pageNum);
+        const pageEvidence = evidenceByPage[pageNum] || [];
+        
+        if (pageEvidence.length > 0) {
+          if (canvas && canvas.width > 0) {
+            // Canvas exists and is rendered, render highlights
+            renderHighlights(pageNum, canvas.width, canvas.height);
+          } else {
+            // Canvas doesn't exist yet, but we have evidence - log a warning
+            console.warn(`⚠️ Page ${pageNum} has ${pageEvidence.length} evidence items but canvas not rendered yet`);
+          }
+        }
+      }
+    }, 100);
+
+    return () => clearTimeout(timeoutId);
+  }, [selectedEvidenceId, hoveredEvidenceId, categoryFilter, pdf, numPages, evidenceByPage, renderHighlights]);
 
   // Render pages when PDF loads or when currentPage changes
   useEffect(() => {
@@ -243,11 +399,40 @@ export default function EnhancedPDFViewer({
     if (currentPage > 1) pagesToRender.add(currentPage - 1);
     if (currentPage < numPages) pagesToRender.add(currentPage + 1);
 
+    // Also render pages that have evidence (render all pages with evidence, not just first 5)
+    const evidencePages = Object.keys(evidenceByPage)
+      .map(p => Number(p))
+      .filter(p => p >= 1 && p <= numPages);
+    evidencePages.forEach(pageNum => {
+      pagesToRender.add(pageNum);
+    });
+    
+    console.log(`📄 Pages to render: ${Array.from(pagesToRender).sort((a, b) => a - b).join(', ')}`);
+    console.log(`📊 Pages with evidence: ${evidencePages.sort((a, b) => a - b).join(', ')}`);
+
     // Render all pages in the set
     pagesToRender.forEach(pageNum => {
-      renderPage(pageNum);
+      if (!pageRenderingRef.current.has(pageNum)) {
+        renderPage(pageNum);
+      }
     });
-  }, [pdf, numPages, scale, currentPage, renderPage]);
+  }, [pdf, numPages, scale, currentPage, renderPage, evidenceByPage]);
+
+  // Re-render highlights when current page changes (in case page was already rendered)
+  useEffect(() => {
+    if (!pdf || numPages === 0) return;
+    
+    const canvas = canvasRefs.current.get(currentPage);
+    const pageEvidence = evidenceByPage[currentPage] || [];
+    
+    if (canvas && canvas.width > 0 && pageEvidence.length > 0) {
+      console.log(`🔄 Re-rendering highlights for current page ${currentPage} (has ${pageEvidence.length} evidence items)`);
+      // Small delay to ensure canvas is ready
+      setTimeout(() => {
+        renderHighlights(currentPage, canvas.width, canvas.height);
+      }, 100);
+    }
+  }, [currentPage, pdf, numPages, evidenceByPage, renderHighlights]);
 
   // Handle evidence click on canvas
   const handleCanvasClick = (pageNum: number, event: React.MouseEvent<HTMLCanvasElement>) => {
@@ -310,6 +495,8 @@ export default function EnhancedPDFViewer({
     }
 
     setHoveredEvidenceId(foundEvidence?.id || null);
+    setHoveredEvidence(foundEvidence);
+    setHoverPosition(foundEvidence ? { x: event.clientX, y: event.clientY } : null);
     canvas.style.cursor = foundEvidence ? 'pointer' : 'default';
   };
 
@@ -447,7 +634,9 @@ export default function EnhancedPDFViewer({
       {/* PDF Pages */}
       <div ref={containerRef} className="flex-1 overflow-auto p-4">
         <div className="flex flex-col items-center space-y-4">
-          {Array.from({ length: numPages }, (_, i) => i + 1).map((pageNum) => (
+          {Array.from({ length: numPages }, (_, i) => i + 1).map((pageNum) => {
+            const hasEvidence = evidenceByPage[pageNum] && evidenceByPage[pageNum].length > 0;
+            return (
             <div
               key={pageNum}
               className="relative bg-white shadow-lg"
@@ -469,21 +658,79 @@ export default function EnhancedPDFViewer({
               {/* Highlight Canvas Overlay */}
               <canvas
                 ref={(el) => {
-                  if (el) highlightCanvasRefs.current.set(pageNum, el);
+                  if (el) {
+                    highlightCanvasRefs.current.set(pageNum, el);
+                    // Ensure canvas is properly sized when ref is set
+                    const pdfCanvas = canvasRefs.current.get(pageNum);
+                    if (pdfCanvas && pdfCanvas.width > 0) {
+                      el.width = pdfCanvas.width;
+                      el.height = pdfCanvas.height;
+                      el.style.width = `${pdfCanvas.width}px`;
+                      el.style.height = `${pdfCanvas.height}px`;
+                      // Re-render highlights if evidence exists
+                      if (evidenceByPage[pageNum] && evidenceByPage[pageNum].length > 0) {
+                        setTimeout(() => {
+                          renderHighlights(pageNum, pdfCanvas.width, pdfCanvas.height);
+                        }, 100);
+                      }
+                    }
+                  }
                 }}
                 className="absolute top-0 left-0 pointer-events-auto"
+                style={{ 
+                  cursor: 'default',
+                  position: 'absolute',
+                  top: 0,
+                  left: 0,
+                  zIndex: 10
+                }}
                 onClick={(e) => handleCanvasClick(pageNum, e)}
                 onMouseMove={(e) => handleCanvasHover(pageNum, e)}
-                onMouseLeave={() => setHoveredEvidenceId(null)}
-                style={{ cursor: 'default' }}
+                onMouseLeave={() => {
+                  setHoveredEvidenceId(null);
+                  setHoveredEvidence(null);
+                  setHoverPosition(null);
+                }}
               />
+
+              {/* Score Impact Tooltip */}
+              {hoveredEvidence && hoverPosition && hoveredEvidence.score_impact !== undefined && (
+                <div
+                  className="fixed z-50 bg-gray-900 text-white text-sm rounded-lg shadow-xl p-3 max-w-xs pointer-events-none"
+                  style={{
+                    left: `${hoverPosition.x + 10}px`,
+                    top: `${hoverPosition.y - 10}px`,
+                    transform: 'translateY(-100%)'
+                  }}
+                >
+                  <div className="font-semibold mb-1 capitalize">{hoveredEvidence.category}</div>
+                  <div className="text-xs text-gray-300 mb-2">{hoveredEvidence.text_snippet.substring(0, 100)}...</div>
+                  <div className="flex items-center space-x-2">
+                    <span className="text-xs text-gray-400">Score Impact:</span>
+                    <span className={`font-bold ${hoveredEvidence.score_impact > 0 ? 'text-green-400' : 'text-red-400'}`}>
+                      {hoveredEvidence.score_impact > 0 ? '+' : ''}{hoveredEvidence.score_impact.toFixed(1)} points
+                    </span>
+                  </div>
+                  {hoveredEvidence.severity && (
+                    <div className="text-xs text-gray-400 mt-1">
+                      Severity: <span className="capitalize">{hoveredEvidence.severity}</span>
+                    </div>
+                  )}
+                </div>
+              )}
 
               {/* Page number indicator */}
               <div className="absolute top-2 left-2 bg-gray-900 bg-opacity-75 text-white px-2 py-1 rounded text-xs font-medium">
                 Page {pageNum}
+                {hasEvidence && (
+                  <span className="ml-2 px-1.5 py-0.5 bg-blue-500 rounded text-xs">
+                    {evidenceByPage[pageNum].length} evidence
+                  </span>
+                )}
               </div>
             </div>
-          ))}
+            );
+          })}
         </div>
       </div>
     </div>
