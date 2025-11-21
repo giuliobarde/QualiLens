@@ -88,60 +88,244 @@ class StatisticalValidatorTool(BaseTool):
             
             # Collect evidence if evidence_collector is provided
             if evidence_collector:
-                # Collect negative evidence (concerns)
+                logger.info("📊 Starting comprehensive statistical evidence collection...")
+                
+                # Collect evidence from ALL statistical tests used (not just concerns)
+                statistical_tests_used = validation_result.get("statistical_tests_used", [])
+                logger.info(f"📊 Collecting evidence for {len(statistical_tests_used)} statistical tests")
+                
+                for test_info in statistical_tests_used:
+                    if isinstance(test_info, dict):
+                        test_name = test_info.get("test_name", "")
+                        test_purpose = test_info.get("purpose", "")
+                        test_appropriateness = test_info.get("appropriateness", "")
+                        test_justification = test_info.get("justification", "")
+                        test_assumptions = test_info.get("assumptions", "")
+                        
+                        if test_name:
+                            # Find the actual text in the paper mentioning this test
+                            test_snippet = self._find_text_snippet(text_content, test_name)
+                            
+                            # Build comprehensive rationale
+                            rationale_parts = [f"Statistical Test: {test_name}"]
+                            if test_purpose:
+                                rationale_parts.append(f"Purpose: {test_purpose}")
+                            if test_appropriateness:
+                                rationale_parts.append(f"Appropriateness: {test_appropriateness}")
+                            if test_justification:
+                                rationale_parts.append(f"Justification: {test_justification}")
+                            if test_assumptions:
+                                rationale_parts.append(f"Assumptions: {test_assumptions}")
+                            
+                            rationale = " | ".join(rationale_parts)
+                            
+                            # Determine score impact based on appropriateness
+                            if "appropriate" in test_appropriateness.lower() or "suitable" in test_appropriateness.lower():
+                                score_impact = 5.0
+                            elif "inappropriate" in test_appropriateness.lower() or "unsuitable" in test_appropriateness.lower():
+                                score_impact = -8.0
+                            else:
+                                score_impact = 0.0
+                            
+                            evidence_collector.add_evidence(
+                                category="statistics",
+                                text_snippet=test_snippet[:500] if test_snippet else f"{test_name}: {test_purpose[:400]}",
+                                rationale=rationale[:1000],
+                                confidence=0.8,
+                                score_impact=score_impact
+                            )
+                            logger.info(f"✅ Added evidence for statistical test: {test_name}")
+                
+                # Collect evidence from ALL concerns (not just top 5)
                 concerns = validation_result.get("statistical_concerns", [])
-                for concern in concerns[:5]:  # Top 5 concerns
+                logger.info(f"📊 Collecting evidence for {len(concerns)} statistical concerns")
+                
+                for idx, concern in enumerate(concerns):
                     if isinstance(concern, dict):
                         concern_text = concern.get("concern", str(concern))
-                        concern_snippet = self._find_text_snippet(text_content, concern_text)
-                        evidence_collector.add_evidence(
-                            category="statistics",
-                            text_snippet=concern_snippet[:300] if concern_snippet else concern_text[:300],
-                            rationale=f"Statistical concern: {concern_text}",
-                            severity=concern.get("severity", "medium"),
-                            confidence=0.75,
-                            score_impact=-8.0 if concern.get("severity") == "high" else -4.0
-                        )
+                        concern_impact = concern.get("impact", "")
+                        concern_recommendation = concern.get("recommendation", "")
+                        concern_severity = concern.get("severity", "medium")
+                        
+                        if concern_text and len(concern_text) > 20:
+                            concern_snippet = self._find_text_snippet(text_content, concern_text)
+                            
+                            # Build comprehensive rationale
+                            rationale_parts = [f"Statistical Concern: {concern_text}"]
+                            if concern_impact:
+                                rationale_parts.append(f"Impact: {concern_impact}")
+                            if concern_recommendation:
+                                rationale_parts.append(f"Recommendation: {concern_recommendation}")
+                            
+                            rationale = " | ".join(rationale_parts)
+                            
+                            evidence_collector.add_evidence(
+                                category="statistics",
+                                text_snippet=concern_snippet[:500] if concern_snippet else concern_text[:500],
+                                rationale=rationale[:1000],
+                                severity=concern_severity,
+                                confidence=0.75,
+                                score_impact=-12.0 if concern_severity == "high" else -6.0 if concern_severity == "medium" else -3.0
+                            )
+                            logger.info(f"✅ Added concern evidence {idx+1}/{len(concerns)}: {concern_severity} severity")
                     elif isinstance(concern, str) and len(concern) > 20:
                         concern_snippet = self._find_text_snippet(text_content, concern)
                         evidence_collector.add_evidence(
                             category="statistics",
-                            text_snippet=concern_snippet[:300] if concern_snippet else concern[:300],
-                            rationale=f"Statistical concern: {concern}",
+                            text_snippet=concern_snippet[:500] if concern_snippet else concern[:500],
+                            rationale=f"Statistical Concern: {concern}. This represents a potential issue with the statistical methods, assumptions, or interpretation that may affect the validity of the results.",
                             confidence=0.75,
                             score_impact=-4.0
                         )
+                        logger.info(f"✅ Added concern evidence (string format)")
                 
-                # Collect positive evidence (appropriate tests, power analysis, etc.)
+                # Collect evidence from test appropriateness assessment
                 test_appropriateness = validation_result.get("test_appropriateness", {})
+                if isinstance(test_appropriateness, dict):
+                    overall_assessment = test_appropriateness.get("overall", "")
+                    specific_tests = test_appropriateness.get("specific_tests", {})
+                    concerns_list = test_appropriateness.get("concerns", [])
+                    missing_tests = test_appropriateness.get("missing_tests", [])
+                    
+                    if overall_assessment and len(overall_assessment) > 30:
+                        assessment_snippet = self._find_text_snippet(text_content, overall_assessment[:50])
+                        evidence_collector.add_evidence(
+                            category="statistics",
+                            text_snippet=assessment_snippet[:500] if assessment_snippet else overall_assessment[:500],
+                            rationale=f"Overall Test Appropriateness Assessment: {overall_assessment}. This provides an overall evaluation of whether the statistical tests used are appropriate for the research design and data.",
+                            confidence=0.8,
+                            score_impact=5.0 if "appropriate" in overall_assessment.lower() else -5.0
+                        )
+                        logger.info(f"✅ Added overall appropriateness assessment")
+                    
+                    # Add evidence for each specific test assessment
+                    if isinstance(specific_tests, dict):
+                        for test_name, test_assessment in specific_tests.items():
+                            if isinstance(test_assessment, str) and len(test_assessment) > 30:
+                                test_snippet = self._find_text_snippet(text_content, test_name)
+                                evidence_collector.add_evidence(
+                                    category="statistics",
+                                    text_snippet=test_snippet[:500] if test_snippet else f"{test_name}: {test_assessment[:450]}",
+                                    rationale=f"Test Appropriateness for {test_name}: {test_assessment}. This evaluates whether this specific statistical test is appropriate for the research question and data characteristics.",
+                                    confidence=0.8,
+                                    score_impact=3.0 if "appropriate" in test_assessment.lower() else -3.0
+                                )
+                                logger.info(f"✅ Added specific test assessment: {test_name}")
+                    
+                    # Add evidence for missing tests
+                    for missing_test in missing_tests:
+                        if isinstance(missing_test, str) and len(missing_test) > 10:
+                            evidence_collector.add_evidence(
+                                category="statistics",
+                                text_snippet=f"Missing statistical test: {missing_test}",
+                                rationale=f"Missing Statistical Test: {missing_test}. This test may have been appropriate for the research design but was not conducted, which could limit the comprehensiveness of the analysis.",
+                                confidence=0.7,
+                                score_impact=-2.0
+                            )
+                            logger.info(f"✅ Added missing test evidence: {missing_test}")
+                
+                # Collect evidence from assumptions checking
+                assumptions_met = validation_result.get("assumptions_met", {})
+                if isinstance(assumptions_met, dict):
+                    normality = assumptions_met.get("normality", {})
+                    independence = assumptions_met.get("independence", {})
+                    homogeneity = assumptions_met.get("homogeneity", {})
+                    overall_assessment = assumptions_met.get("overall_assessment", "")
+                    
+                    if isinstance(normality, dict):
+                        normality_checked = normality.get("checked", "")
+                        normality_violations = normality.get("violations", "")
+                        if normality_checked and len(normality_checked) > 20:
+                            norm_snippet = self._find_text_snippet(text_content, "normality")
+                            evidence_collector.add_evidence(
+                                category="statistics",
+                                text_snippet=norm_snippet[:500] if norm_snippet else f"Normality: {normality_checked[:450]}",
+                                rationale=f"Normality Assumption: {normality_checked}. Violations: {normality_violations if normality_violations else 'None reported'}. This describes whether the normality assumption for parametric tests was checked and any violations found.",
+                                confidence=0.8,
+                                score_impact=3.0 if "checked" in normality_checked.lower() and "violation" not in str(normality_violations).lower() else -3.0
+                            )
+                            logger.info(f"✅ Added normality assumption evidence")
+                    
+                    if isinstance(independence, dict):
+                        independence_assessed = independence.get("assessed", "")
+                        if independence_assessed and len(independence_assessed) > 20:
+                            indep_snippet = self._find_text_snippet(text_content, "independence")
+                            evidence_collector.add_evidence(
+                                category="statistics",
+                                text_snippet=indep_snippet[:500] if indep_snippet else f"Independence: {independence_assessed[:450]}",
+                                rationale=f"Independence Assumption: {independence_assessed}. This describes whether the independence assumption for statistical tests was assessed.",
+                                confidence=0.8,
+                                score_impact=2.0 if "assessed" in independence_assessed.lower() else -2.0
+                            )
+                            logger.info(f"✅ Added independence assumption evidence")
+                    
+                    if overall_assessment and len(overall_assessment) > 30:
+                        overall_snippet = self._find_text_snippet(text_content, overall_assessment[:50])
+                        evidence_collector.add_evidence(
+                            category="statistics",
+                            text_snippet=overall_snippet[:500] if overall_snippet else overall_assessment[:500],
+                            rationale=f"Overall Assumption Assessment: {overall_assessment}. This provides a comprehensive evaluation of whether statistical assumptions were properly checked and met.",
+                            confidence=0.8,
+                            score_impact=4.0 if "met" in overall_assessment.lower() or "satisfied" in overall_assessment.lower() else -4.0
+                        )
+                        logger.info(f"✅ Added overall assumption assessment")
+                
+                # Collect evidence from power analysis
                 power_analysis = validation_result.get("power_analysis", {})
-                
-                # Positive evidence for appropriate statistical tests
-                if test_appropriateness and any(
-                    v.get("appropriate", False) for v in test_appropriateness.values() 
-                    if isinstance(v, dict)
-                ):
-                    test_snippet = self._find_text_snippet(text_content, "statistical test")
-                    if test_snippet:
+                if isinstance(power_analysis, dict):
+                    power_conducted = power_analysis.get("conducted", "")
+                    power_method = power_analysis.get("method", "")
+                    power_adequate = power_analysis.get("adequate", "")
+                    power_achieved = power_analysis.get("power_achieved", "")
+                    
+                    if power_conducted and len(power_conducted) > 20:
+                        power_snippet = self._find_text_snippet(text_content, "power")
+                        rationale_parts = [f"Power Analysis: {power_conducted}"]
+                        if power_method:
+                            rationale_parts.append(f"Method: {power_method}")
+                        if power_adequate:
+                            rationale_parts.append(f"Adequacy: {power_adequate}")
+                        if power_achieved:
+                            rationale_parts.append(f"Power Achieved: {power_achieved}")
+                        
+                        rationale = " | ".join(rationale_parts)
+                        
                         evidence_collector.add_evidence(
                             category="statistics",
-                            text_snippet=test_snippet[:300],
-                            rationale="Appropriate statistical tests used",
+                            text_snippet=power_snippet[:500] if power_snippet else f"Power analysis: {power_conducted[:450]}",
+                            rationale=f"{rationale}. Power analysis determines whether the study had sufficient sample size to detect meaningful effects.",
                             confidence=0.8,
-                            score_impact=+6.0
+                            score_impact=8.0 if "yes" in power_conducted.lower() or "conducted" in power_conducted.lower() else -5.0
                         )
+                        logger.info(f"✅ Added power analysis evidence")
                 
-                # Positive evidence for power analysis
-                if power_analysis and power_analysis.get("performed", False):
-                    power_snippet = self._find_text_snippet(text_content, "power analysis")
-                    if power_snippet:
+                # Collect evidence from effect size interpretation
+                effect_size_interpretation = validation_result.get("effect_size_interpretation", {})
+                if isinstance(effect_size_interpretation, dict):
+                    effect_reported = effect_size_interpretation.get("reported", "")
+                    effect_interpretation = effect_size_interpretation.get("interpretation", "")
+                    confidence_intervals = effect_size_interpretation.get("confidence_intervals", "")
+                    
+                    if effect_reported and len(effect_reported) > 20:
+                        effect_snippet = self._find_text_snippet(text_content, "effect size")
+                        rationale_parts = [f"Effect Size Reporting: {effect_reported}"]
+                        if effect_interpretation:
+                            rationale_parts.append(f"Interpretation: {effect_interpretation}")
+                        if confidence_intervals:
+                            rationale_parts.append(f"Confidence Intervals: {confidence_intervals}")
+                        
+                        rationale = " | ".join(rationale_parts)
+                        
                         evidence_collector.add_evidence(
                             category="statistics",
-                            text_snippet=power_snippet[:300],
-                            rationale="Power analysis performed",
+                            text_snippet=effect_snippet[:500] if effect_snippet else f"Effect size: {effect_reported[:450]}",
+                            rationale=f"{rationale}. Effect sizes provide information about the magnitude of effects beyond statistical significance.",
                             confidence=0.8,
-                            score_impact=+8.0
+                            score_impact=6.0 if "yes" in effect_reported.lower() or "reported" in effect_reported.lower() else -3.0
                         )
+                        logger.info(f"✅ Added effect size evidence")
+                
+                logger.info(f"✅ Statistical evidence collection complete.")
             
             return {
                 "success": True,

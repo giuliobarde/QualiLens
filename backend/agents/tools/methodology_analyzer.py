@@ -103,7 +103,9 @@ class MethodologyAnalyzerTool(BaseTool):
 
             # Collect evidence if evidence_collector is provided
             if evidence_collector:
-                # Collect evidence from detected methodologies
+                logger.info("📊 Starting comprehensive methodology evidence collection...")
+                
+                # Collect evidence from detected methodologies (ALL of them, not limited)
                 detected_methodologies = methodology_result.get("detected_methodologies", {})
                 methodologies_list = detected_methodologies.get("methodologies", [])
 
@@ -114,6 +116,7 @@ class MethodologyAnalyzerTool(BaseTool):
                     methodology_type = methodology.get("type", "Unknown")
                     evidence_text = methodology.get("evidence_text", "")
                     quality_assessment = methodology.get("quality_assessment", {})
+                    implementation_quality = methodology.get("implementation_quality", {})
 
                     if evidence_text and len(evidence_text) > 20:
                         # Determine score impact based on quality rating
@@ -127,49 +130,188 @@ class MethodologyAnalyzerTool(BaseTool):
                         }
                         score_impact = score_impact_map.get(quality_rating, 0.0)
 
-                        # Create comprehensive rationale
-                        rationale_parts = [f"Methodology: {methodology_type}"]
+                        # Create comprehensive rationale explaining the methodology
+                        rationale_parts = [f"Methodology Type: {methodology_type}"]
+                        rationale_parts.append(f"Category: {methodology.get('category', 'Unknown')}")
+                        
+                        # Add appropriateness assessment
                         if quality_assessment.get("is_appropriate") is False:
                             rationale_parts.append("⚠️ This methodology may not be appropriate for the research question.")
-                        rationale_parts.append(quality_assessment.get("rationale", ""))
+                        elif quality_assessment.get("is_appropriate") is True:
+                            rationale_parts.append("✓ This methodology is appropriate for the research question.")
+                        
+                        # Add detailed rationale from quality assessment
+                        if quality_assessment.get("rationale"):
+                            rationale_parts.append(f"Assessment: {quality_assessment.get('rationale')}")
+                        
+                        # Add strengths
+                        strengths_list = quality_assessment.get("strengths", [])
+                        if strengths_list:
+                            rationale_parts.append(f"Strengths: {'; '.join(strengths_list[:3])}")
+                        
+                        # Add weaknesses
+                        weaknesses_list = quality_assessment.get("weaknesses", [])
+                        if weaknesses_list:
+                            rationale_parts.append(f"Weaknesses: {'; '.join(weaknesses_list[:3])}")
+                        
+                        # Add implementation quality details
+                        if implementation_quality:
+                            impl_details = []
+                            if implementation_quality.get("sample_size_adequate") is not None:
+                                impl_details.append(f"Sample size adequate: {implementation_quality.get('sample_size_adequate')}")
+                            if implementation_quality.get("measurement_validity"):
+                                impl_details.append(f"Measurement validity: {implementation_quality.get('measurement_validity')}")
+                            if implementation_quality.get("reporting_completeness"):
+                                impl_details.append(f"Reporting completeness: {implementation_quality.get('reporting_completeness')}")
+                            if impl_details:
+                                rationale_parts.append(f"Implementation: {'; '.join(impl_details)}")
 
-                        rationale = " ".join(rationale_parts)
+                        rationale = " | ".join(rationale_parts)
 
                         evidence_collector.add_evidence(
                             category="methodology",
-                            text_snippet=evidence_text[:300],
-                            rationale=rationale[:500],
+                            text_snippet=evidence_text[:500],  # Increased from 300
+                            rationale=rationale[:1000],  # Increased from 500 for more detail
                             confidence=methodology.get("confidence", 0.7),
                             score_impact=score_impact
                         )
 
                         logger.info(f"✅ Added evidence for methodology: {methodology_type} (impact: {score_impact})")
 
-                # Also collect evidence from traditional strengths/weaknesses
+                # Collect evidence from ALL strengths (not just top 3)
                 strengths = methodology_result.get("methodological_strengths", [])
-                weaknesses = methodology_result.get("methodological_weaknesses", [])
+                logger.info(f"📊 Collecting evidence for {len(strengths)} methodological strengths")
 
-                # Add evidence for strengths
-                for strength in strengths[:3]:  # Top 3 strengths
+                for idx, strength in enumerate(strengths):
                     if strength and len(strength) > 20:
+                        # Find the actual text in the paper for this strength
+                        strength_snippet = self._find_methodology_text_in_paper(text_content, strength)
                         evidence_collector.add_evidence(
                             category="methodology",
-                            text_snippet=strength[:200],
-                            rationale=f"Methodological strength: {strength}",
-                            confidence=0.7,
+                            text_snippet=strength_snippet[:400] if strength_snippet else strength[:400],
+                            rationale=f"Methodological Strength: {strength}. This represents a positive aspect of the study design or implementation that enhances the validity and reliability of the research.",
+                            confidence=0.75,
                             score_impact=5.0
                         )
+                        logger.info(f"✅ Added strength evidence {idx+1}/{len(strengths)}")
 
-                # Add evidence for weaknesses
-                for weakness in weaknesses[:3]:  # Top 3 weaknesses
+                # Collect evidence from ALL weaknesses (not just top 3)
+                weaknesses = methodology_result.get("methodological_weaknesses", [])
+                logger.info(f"📊 Collecting evidence for {len(weaknesses)} methodological weaknesses")
+
+                for idx, weakness in enumerate(weaknesses):
                     if weakness and len(weakness) > 20:
+                        # Find the actual text in the paper for this weakness
+                        weakness_snippet = self._find_methodology_text_in_paper(text_content, weakness)
                         evidence_collector.add_evidence(
                             category="methodology",
-                            text_snippet=weakness[:200],
-                            rationale=f"Methodological weakness: {weakness}",
-                            confidence=0.7,
+                            text_snippet=weakness_snippet[:400] if weakness_snippet else weakness[:400],
+                            rationale=f"Methodological Weakness: {weakness}. This represents a limitation or concern in the study design or implementation that may affect the validity, reliability, or generalizability of the research findings.",
+                            confidence=0.75,
                             score_impact=-5.0
                         )
+                        logger.info(f"✅ Added weakness evidence {idx+1}/{len(weaknesses)}")
+
+                # Collect evidence from study design details
+                study_design = methodology_result.get("study_design", {})
+                if isinstance(study_design, dict):
+                    study_design_type = study_design.get("type", "")
+                    study_design_rationale = study_design.get("rationale", "")
+                    if study_design_type and study_design_rationale:
+                        design_snippet = self._find_methodology_text_in_paper(text_content, study_design_type)
+                        evidence_collector.add_evidence(
+                            category="methodology",
+                            text_snippet=design_snippet[:400] if design_snippet else f"{study_design_type}: {study_design_rationale[:300]}",
+                            rationale=f"Study Design: {study_design_type}. Rationale: {study_design_rationale}. This describes the overall research design approach and why it was chosen for this study.",
+                            confidence=0.8,
+                            score_impact=3.0
+                        )
+                        logger.info(f"✅ Added study design evidence")
+
+                # Collect evidence from sample characteristics
+                sample_characteristics = methodology_result.get("sample_characteristics", {})
+                if isinstance(sample_characteristics, dict):
+                    sample_size = sample_characteristics.get("sample_size", "")
+                    inclusion_criteria = sample_characteristics.get("inclusion_criteria", "")
+                    exclusion_criteria = sample_characteristics.get("exclusion_criteria", "")
+                    
+                    if sample_size and len(sample_size) > 10:
+                        sample_snippet = self._find_methodology_text_in_paper(text_content, sample_size[:50])
+                        evidence_collector.add_evidence(
+                            category="methodology",
+                            text_snippet=sample_snippet[:400] if sample_snippet else sample_size[:400],
+                            rationale=f"Sample Characteristics: {sample_size}. This describes the study participants, including sample size, demographics, and recruitment methods.",
+                            confidence=0.8,
+                            score_impact=2.0
+                        )
+                        logger.info(f"✅ Added sample size evidence")
+                    
+                    if inclusion_criteria and len(inclusion_criteria) > 20:
+                        criteria_snippet = self._find_methodology_text_in_paper(text_content, inclusion_criteria[:50])
+                        evidence_collector.add_evidence(
+                            category="methodology",
+                            text_snippet=criteria_snippet[:400] if criteria_snippet else f"Inclusion: {inclusion_criteria[:350]}",
+                            rationale=f"Inclusion Criteria: {inclusion_criteria}. This specifies the characteristics that participants must have to be included in the study.",
+                            confidence=0.8,
+                            score_impact=2.0
+                        )
+                        logger.info(f"✅ Added inclusion criteria evidence")
+                    
+                    if exclusion_criteria and len(exclusion_criteria) > 20:
+                        criteria_snippet = self._find_methodology_text_in_paper(text_content, exclusion_criteria[:50])
+                        evidence_collector.add_evidence(
+                            category="methodology",
+                            text_snippet=criteria_snippet[:400] if criteria_snippet else f"Exclusion: {exclusion_criteria[:350]}",
+                            rationale=f"Exclusion Criteria: {exclusion_criteria}. This specifies the characteristics that would exclude participants from the study.",
+                            confidence=0.8,
+                            score_impact=2.0
+                        )
+                        logger.info(f"✅ Added exclusion criteria evidence")
+
+                # Collect evidence from data collection methods
+                data_collection = methodology_result.get("data_collection", {})
+                if isinstance(data_collection, dict):
+                    methods = data_collection.get("methods", "")
+                    instruments = data_collection.get("instruments", "")
+                    
+                    if methods and len(methods) > 30:
+                        methods_snippet = self._find_methodology_text_in_paper(text_content, methods[:50])
+                        evidence_collector.add_evidence(
+                            category="methodology",
+                            text_snippet=methods_snippet[:400] if methods_snippet else methods[:400],
+                            rationale=f"Data Collection Methods: {methods}. This describes how data were collected in the study, including procedures, instruments, and protocols.",
+                            confidence=0.8,
+                            score_impact=3.0
+                        )
+                        logger.info(f"✅ Added data collection methods evidence")
+                    
+                    if instruments and len(instruments) > 30:
+                        instruments_snippet = self._find_methodology_text_in_paper(text_content, instruments[:50])
+                        evidence_collector.add_evidence(
+                            category="methodology",
+                            text_snippet=instruments_snippet[:400] if instruments_snippet else instruments[:400],
+                            rationale=f"Data Collection Instruments: {instruments}. This describes the tools, questionnaires, or instruments used to collect data, including their validation and reliability.",
+                            confidence=0.8,
+                            score_impact=3.0
+                        )
+                        logger.info(f"✅ Added instruments evidence")
+
+                # Collect evidence from analysis methods
+                analysis_methods = methodology_result.get("analysis_methods", {})
+                if isinstance(analysis_methods, dict):
+                    statistical_tests = analysis_methods.get("statistical_tests", "")
+                    if statistical_tests and len(statistical_tests) > 30:
+                        tests_snippet = self._find_methodology_text_in_paper(text_content, statistical_tests[:50])
+                        evidence_collector.add_evidence(
+                            category="methodology",
+                            text_snippet=tests_snippet[:400] if tests_snippet else statistical_tests[:400],
+                            rationale=f"Analysis Methods: {statistical_tests}. This describes the statistical tests and analytical approaches used to analyze the data.",
+                            confidence=0.8,
+                            score_impact=3.0
+                        )
+                        logger.info(f"✅ Added analysis methods evidence")
+
+                logger.info(f"✅ Methodology evidence collection complete. Total evidence items added.")
             
             return {
                 "success": True,
@@ -1299,3 +1441,30 @@ Consider field-specific standards and provide varied, realistic scores based on 
 
         final_score = min(100.0, max(0.0, base_score + variation))
         return round(final_score, 1)
+    
+    def _find_methodology_text_in_paper(self, text_content: str, search_text: str) -> Optional[str]:
+        """Find methodology-related text in the paper content."""
+        if not text_content or not search_text:
+            return None
+        
+        # Normalize text for searching
+        text_lower = text_content.lower()
+        search_lower = search_text.lower().strip()
+        
+        # Try to find exact or partial match
+        idx = text_lower.find(search_lower)
+        if idx == -1:
+            # Try finding key words (first 3-4 meaningful words)
+            words = [w for w in search_lower.split() if len(w) > 3][:4]
+            for word in words:
+                idx = text_lower.find(word)
+                if idx != -1:
+                    break
+        
+        if idx != -1:
+            # Extract context around the match
+            start = max(0, idx - 150)
+            end = min(len(text_content), idx + len(search_text) + 250)
+            return text_content[start:end].strip()
+        
+        return None

@@ -204,6 +204,44 @@ class BiasDetectionTool(BaseTool):
                     )
 
                     logger.info(f"✅ Added evidence {evidence_id} for bias: {section_name} ({bias_type}, {severity} severity, impact: {score_impact:.1f}, text_length: {len(text_to_add)} chars)")
+                
+                # Also collect evidence from limitations (these are important for peer reviewers)
+                limitations = bias_analysis.get("limitations", [])
+                logger.info(f"📊 Collecting evidence for {len(limitations)} study limitations")
+                
+                for idx, limitation in enumerate(limitations):
+                    if isinstance(limitation, str) and len(limitation) > 30:
+                        # Try to find this limitation in the paper
+                        limitation_snippet = self._find_limitation_text(text_content, limitation)
+                        evidence_collector.add_evidence(
+                            category="bias",
+                            text_snippet=limitation_snippet[:500] if limitation_snippet else limitation[:500],
+                            rationale=f"Study Limitation: {limitation}. This represents a constraint or weakness in the study design that may affect the interpretation or generalizability of the findings, but is not necessarily a systematic bias.",
+                            confidence=0.7,
+                            severity="low",
+                            score_impact=-2.0
+                        )
+                        logger.info(f"✅ Added limitation evidence {idx+1}/{len(limitations)}")
+                
+                # Collect evidence from confounding factors
+                confounding_factors = bias_analysis.get("confounding_factors", [])
+                logger.info(f"📊 Collecting evidence for {len(confounding_factors)} confounding factors")
+                
+                for idx, confounder in enumerate(confounding_factors):
+                    if isinstance(confounder, str) and len(confounder) > 30:
+                        # Try to find this confounder in the paper
+                        confounder_snippet = self._find_limitation_text(text_content, confounder)
+                        evidence_collector.add_evidence(
+                            category="bias",
+                            text_snippet=confounder_snippet[:500] if confounder_snippet else confounder[:500],
+                            rationale=f"Confounding Factor: {confounder}. This represents a variable that may be associated with both the exposure and outcome, potentially distorting the true relationship. This is important for peer reviewers to verify whether confounding was adequately controlled.",
+                            confidence=0.75,
+                            severity="medium",
+                            score_impact=-8.0
+                        )
+                        logger.info(f"✅ Added confounding factor evidence {idx+1}/{len(confounding_factors)}")
+                
+                logger.info(f"✅ Bias evidence collection complete. Total biases: {len(detected_biases)}, Limitations: {len(limitations)}, Confounders: {len(confounding_factors)}")
             
             return {
                 "success": True,
@@ -497,3 +535,30 @@ REMEMBER: Be conservative in rejecting - only reject if >90% certain it's not a 
             import traceback
             logger.error(traceback.format_exc())
             return {"error": str(e)}
+    
+    def _find_limitation_text(self, text_content: str, search_text: str) -> Optional[str]:
+        """Find limitation or confounding factor text in the paper content."""
+        if not text_content or not search_text:
+            return None
+        
+        # Normalize text for searching
+        text_lower = text_content.lower()
+        search_lower = search_text.lower().strip()
+        
+        # Try to find exact or partial match
+        idx = text_lower.find(search_lower)
+        if idx == -1:
+            # Try finding key words (first 3-4 meaningful words)
+            words = [w for w in search_lower.split() if len(w) > 3][:4]
+            for word in words:
+                idx = text_lower.find(word)
+                if idx != -1:
+                    break
+        
+        if idx != -1:
+            # Extract context around the match
+            start = max(0, idx - 200)
+            end = min(len(text_content), idx + len(search_text) + 300)
+            return text_content[start:end].strip()
+        
+        return None
