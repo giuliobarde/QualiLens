@@ -7,6 +7,7 @@ in research papers to provide critical quality assessment.
 
 import logging
 import json
+import re
 from typing import Dict, Any, Optional, List
 from .base_tool import BaseTool, ToolMetadata
 
@@ -16,6 +17,10 @@ import os
 sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 
 from LLM.openai_client import OpenAIClient
+
+# Import tool result cache
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+from tool_result_cache import ToolResultCache
 
 logger = logging.getLogger(__name__)
 
@@ -28,6 +33,7 @@ class BiasDetectionTool(BaseTool):
     def __init__(self):
         super().__init__()
         self.openai_client = None
+        self.result_cache = ToolResultCache()
     
     def _get_openai_client(self):
         """Get OpenAI client, initializing it lazily if needed."""
@@ -88,8 +94,32 @@ class BiasDetectionTool(BaseTool):
             if bias_types is None:
                 bias_types = ["selection", "measurement", "confounding", "publication", "reporting"]
             
-            # Generate bias detection analysis
-            bias_analysis = self._detect_biases(text_content, bias_types, severity_threshold)
+            # Check cache first (evidence_collector is not part of cache key as it's for output only)
+            cache_key_params = {
+                "bias_types": bias_types,
+                "severity_threshold": severity_threshold
+            }
+            cached_result = self.result_cache.get_cached_result(
+                "bias_detection_tool",
+                text_content,
+                **cache_key_params
+            )
+            
+            if cached_result:
+                logger.info("✅ Using cached bias detection result")
+                bias_analysis = cached_result
+            else:
+                # Generate bias detection analysis
+                bias_analysis = self._detect_biases(text_content, bias_types, severity_threshold)
+                
+                # Cache the result (before evidence collection)
+                if bias_analysis.get("success") and not bias_analysis.get("error"):
+                    self.result_cache.cache_result(
+                        "bias_detection_tool",
+                        text_content,
+                        bias_analysis,
+                        **cache_key_params
+                    )
             
             # Collect evidence if evidence_collector is provided
             if evidence_collector:
@@ -166,23 +196,28 @@ class BiasDetectionTool(BaseTool):
 
                     # Build comprehensive rationale using chain-of-thought reasoning
                     section_name = bias.get("section_name", "Unknown section")
+                    bias_type = bias.get("bias_type", "unknown")
                     verification_reasoning = bias.get("verification_reasoning", "")
                     why_bias = bias.get("why_bias_not_limitation", "")
                     impact = bias.get("impact", "")
+                    confidence_val = bias.get("confidence_percentage", 0)
 
-                    # Construct detailed rationale
-                    rationale_parts = [f"Bias detected in section: {section_name}"]
+                    # Construct detailed rationale that explains why/why not this is a bias
+                    rationale_parts = [f"🔍 BIAS DETECTED: {bias_type.replace('_', ' ').title()} in section: {section_name}"]
 
                     if verification_reasoning:
-                        rationale_parts.append(f"Reasoning: {verification_reasoning}")
+                        rationale_parts.append(f"\n📋 VERIFICATION REASONING:\n{verification_reasoning}")
 
                     if why_bias:
-                        rationale_parts.append(f"Why this is bias (not limitation): {why_bias}")
+                        rationale_parts.append(f"\n⚖️ WHY THIS IS A BIAS (NOT JUST A LIMITATION):\n{why_bias}")
 
                     if impact:
-                        rationale_parts.append(f"Impact: {impact}")
+                        rationale_parts.append(f"\n💥 IMPACT ON STUDY VALIDITY:\n{impact}")
 
-                    full_rationale = " | ".join(rationale_parts)
+                    if confidence_val:
+                        rationale_parts.append(f"\n📊 Confidence Level: {confidence_val}%")
+
+                    full_rationale = "\n".join(rationale_parts)
 
                     # Add evidence to collector
                     # Don't truncate if we have full_section_text - preserve the complete context
@@ -197,7 +232,7 @@ class BiasDetectionTool(BaseTool):
                     evidence_id = evidence_collector.add_evidence(
                         category="bias",
                         text_snippet=text_to_add,
-                        rationale=full_rationale[:1200],  # Increased length for chain-of-thought
+                        rationale=full_rationale[:2000],  # Increased length for detailed chain-of-thought reasoning
                         severity=severity,
                         confidence=confidence,
                         score_impact=score_impact
@@ -259,200 +294,187 @@ class BiasDetectionTool(BaseTool):
             
         except Exception as e:
             logger.error(f"Bias detection failed: {str(e)}")
+            import traceback
+            logger.error(traceback.format_exc())
             return {
                 "success": False,
                 "error": str(e),
                 "tool_used": "bias_detection_tool"
             }
     
+    def _pattern_match_biases(self, text_content: str) -> List[Dict[str, Any]]:
+        """
+        Pattern matching to find obvious bias indicators before LLM analysis.
+        This helps ensure we don't miss obvious biases.
+        """
+        patterns = []
+        text_lower = text_content.lower()
+        
+        # Industry/Commercial Funding
+        funding_patterns = [
+            r"funded by\s+([A-Z][a-z]+(?:\s+[A-Z][a-z]+)*\s+(?:Inc|Ltd|Corp|Pharma|Pharmaceuticals|Company))",
+            r"supported by\s+([A-Z][a-z]+(?:\s+[A-Z][a-z]+)*\s+(?:Inc|Ltd|Corp|Pharma|Pharmaceuticals|Company))",
+            r"sponsored by\s+([A-Z][a-z]+(?:\s+[A-Z][a-z]+)*\s+(?:Inc|Ltd|Corp|Pharma|Pharmaceuticals|Company))",
+            r"grant from\s+([A-Z][a-z]+(?:\s+[A-Z][a-z]+)*\s+(?:Inc|Ltd|Corp|Pharma|Pharmaceuticals|Company))"
+        ]
+        for pattern in funding_patterns:
+            matches = re.finditer(pattern, text_content, re.IGNORECASE)
+            for match in matches:
+                patterns.append({
+                    "type": "publication_bias",
+                    "indicator": "Industry/commercial funding",
+                    "text": match.group(0),
+                    "severity": "high"
+                })
+        
+        # Single-center design
+        if re.search(r"single[- ]center|single[- ]centre|single[- ]site|single[- ]institution", text_lower):
+            patterns.append({
+                "type": "selection_bias",
+                "indicator": "Single-center design",
+                "text": re.search(r"single[- ]center|single[- ]centre|single[- ]site|single[- ]institution", text_lower, re.IGNORECASE).group(0),
+                "severity": "medium"
+            })
+        
+        # Per-protocol analysis
+        if re.search(r"per[- ]protocol|per protocol|pp analysis|primary analysis.*per", text_lower):
+            patterns.append({
+                "type": "selection_bias",
+                "indicator": "Per-protocol primary analysis",
+                "text": re.search(r"per[- ]protocol|per protocol|pp analysis|primary analysis.*per", text_lower, re.IGNORECASE).group(0),
+                "severity": "high"
+            })
+        
+        # LOCF
+        if re.search(r"\blocf\b|last observation carried forward", text_lower):
+            patterns.append({
+                "type": "measurement_bias",
+                "indicator": "LOCF imputation",
+                "text": re.search(r"\blocf\b|last observation carried forward", text_lower, re.IGNORECASE).group(0),
+                "severity": "medium"
+            })
+        
+        # Proprietary measures
+        if re.search(r"proprietary|developed by (?:the )?authors?|custom instrument|unvalidated", text_lower):
+            patterns.append({
+                "type": "measurement_bias",
+                "indicator": "Proprietary or unvalidated measure",
+                "text": re.search(r"proprietary|developed by (?:the )?authors?|custom instrument|unvalidated", text_lower, re.IGNORECASE).group(0),
+                "severity": "high"
+            })
+        
+        # Self-reported adherence
+        if re.search(r"self[- ]reported.*adherence|self[- ]reported.*compliance|adherence.*self[- ]reported", text_lower):
+            patterns.append({
+                "type": "measurement_bias",
+                "indicator": "Self-reported adherence without validation",
+                "text": re.search(r"self[- ]reported.*adherence|self[- ]reported.*compliance|adherence.*self[- ]reported", text_lower, re.IGNORECASE).group(0),
+                "severity": "medium"
+            })
+        
+        # Short follow-up (12-week or less for long-term outcomes)
+        if re.search(r"\b(?:12|8|6|4)[- ]week|short[- ]term|brief follow[- ]up", text_lower):
+            patterns.append({
+                "type": "temporal_bias",
+                "indicator": "Short follow-up duration",
+                "text": re.search(r"\b(?:12|8|6|4)[- ]week|short[- ]term|brief follow[- ]up", text_lower, re.IGNORECASE).group(0),
+                "severity": "medium"
+            })
+        
+        # Restricted data access
+        if re.search(r"data available (?:upon|on) request|proprietary data|data not publicly available|restricted access", text_lower):
+            patterns.append({
+                "type": "reporting_bias",
+                "indicator": "Restricted data access",
+                "text": re.search(r"data available (?:upon|on) request|proprietary data|data not publicly available|restricted access", text_lower, re.IGNORECASE).group(0),
+                "severity": "medium"
+            })
+        
+        return patterns
+    
     def _detect_biases(self, text_content: str, bias_types: List[str], severity_threshold: str) -> Dict[str, Any]:
         """
-        Detect various types of biases in the research paper using a comprehensive two-phase approach.
-
-        PHASE 1: Section-Level Analysis
-        - Analyze the entire paper to identify sections that could potentially contain biases
-        - Break down the paper into meaningful sections (methodology, results, discussion, etc.)
-        - Flag sections that show indicators of potential bias
-
-        PHASE 2: Detailed Verification with Chain-of-Thought
-        - For each flagged section, perform detailed verification
-        - Determine whether the section actually contains bias
-        - Provide explicit reasoning for why it is or isn't biased
-        - Include specific evidence and impact assessment
+        Detect biases using pattern matching + single-pass LLM approach.
+        NEW SIMPLIFIED APPROACH: Direct detection without overly conservative verification.
         """
         try:
-            # PHASE 1: Identify potentially biased sections across the paper
-            logger.info("🔍 PHASE 1: Identifying potentially biased sections across the paper...")
-
-            section_analysis_prompt = f"""
-You are an expert research methodologist. Your task is to analyze this research paper and identify SECTIONS that potentially contain biases.
+            # Use full text content
+            text_length = len(text_content)
+            if text_length > 100000:
+                # For very long papers, take strategic sections
+                text_for_analysis = text_content[:40000] + "\n\n[... middle sections omitted ...]\n\n" + text_content[-30000:]
+                logger.info(f"Text content is {text_length} chars, using first 40000 + last 30000 for analysis")
+            else:
+                text_for_analysis = text_content
+                logger.info(f"Using full text content ({text_length} chars) for analysis")
+            
+            # STEP 1: Pattern matching to find obvious bias indicators
+            logger.info("🔍 STEP 1: Pattern matching for obvious bias indicators...")
+            pattern_matches = self._pattern_match_biases(text_for_analysis)
+            logger.info(f"✅ Pattern matching found {len(pattern_matches)} potential bias indicators")
+            
+            # STEP 2: Single-pass LLM detection with explicit instructions
+            logger.info("🔍 STEP 2: LLM-based bias detection...")
+            
+            # Build pattern match context for LLM
+            pattern_context = ""
+            if pattern_matches:
+                pattern_context = "\n\nPATTERN MATCHING FOUND THESE POTENTIAL BIASES (YOU MUST VERIFY AND EXPAND ON THESE):\n"
+                for i, match in enumerate(pattern_matches, 1):
+                    pattern_context += f"{i}. {match['indicator']} ({match['type']}, {match['severity']} severity) - Found text: '{match['text'][:100]}'\n"
+            
+            detection_prompt = f"""You are an expert research methodologist detecting biases in research papers. Your task is to identify ALL biases, especially implicit ones.
 
 PAPER CONTENT:
-{text_content[:8000]}
+{text_for_analysis[:50000]}{pattern_context}
+
+CRITICAL INSTRUCTIONS:
+1. You MUST find at least 2-5 biases. If you find 0 biases, you are NOT being thorough enough.
+2. Look for IMPLICIT biases - things that are stated but not explicitly called "bias"
+3. Use the pattern matches above as starting points - verify them and find additional biases
+4. Be AGGRESSIVE in detection - err on the side of finding biases rather than missing them
+5. Extract the FULL TEXT where each bias appears (at least 100-300 words of context)
 
 BIAS TYPES TO DETECT: {', '.join(bias_types)}
 
-PHASE 1 INSTRUCTIONS - SECTION-LEVEL ANALYSIS:
-Your goal is to scan through the ENTIRE paper and identify specific sections or passages that may contain biases.
+EXPLICIT PATTERNS TO LOOK FOR (these are ALWAYS biases):
+- "single-center" or "single site" → Selection bias (limited generalizability)
+- "per-protocol" as primary analysis → Selection bias (excludes non-adherent participants)
+- "LOCF" or "last observation carried forward" → Measurement bias (assumes no change)
+- "proprietary" or "developed by authors" instrument → Measurement bias (unvalidated)
+- "self-reported adherence" without validation → Measurement bias
+- Industry/commercial funding → Publication bias, conflict of interest
+- "12-week" or short follow-up for long-term outcomes → Temporal bias
+- "data available upon request" → Reporting bias (restricted access)
+- Multiple subgroup analyses without correction → Publication bias (p-hacking)
 
-CRITICAL: For each potentially biased section, you must extract the COMPLETE text of that section so readers can see the full context.
+For EACH bias you find, provide:
+1. section_name: Where in the paper (e.g., "Methods - Analysis", "Acknowledgments")
+2. bias_type: selection_bias | measurement_bias | confounding_bias | publication_bias | reporting_bias
+3. description: Clear description of the bias
+4. full_section_text: The COMPLETE text where this bias appears (100-500 words)
+5. evidence: Specific quote showing the bias
+6. severity: low | medium | high
+7. impact: How this affects study validity
+8. confidence_percentage: 70-100 (be confident if pattern matches or explicit)
 
-For each potentially biased section, provide:
-1. The section name/location (e.g., "Methods - Sampling", "Results - Statistical Analysis", "Discussion - Interpretation")
-2. The FULL TEXT of the entire section or paragraph that contains the bias (100-500 words minimum - include complete context)
-3. The type of bias you suspect (selection, measurement, confounding, publication, reporting)
-4. Initial red flags that suggest this section might be biased
-5. Preliminary severity estimate
-
-Think systematically through these areas:
-- **Abstract & Introduction**: Claims, framing, literature review completeness
-- **Methods**:
-  - Sampling methods and participant selection
-  - Measurement instruments and procedures
-  - Randomization and control procedures
-  - Statistical analysis choices
-- **Results**:
-  - Selective reporting of outcomes
-  - Statistical presentation and interpretation
-  - Missing data handling
-- **Discussion**:
-  - Interpretation of findings
-  - Acknowledgment of limitations
-  - Generalization claims
-- **Overall**: Conflicts of interest, funding influence, missing information
-
-Provide your analysis in JSON format:
-{{
-  "potentially_biased_sections": [
-    {{
-      "section_name": "Name/location of the section (e.g., 'Methods - Participant Selection')",
-      "full_section_text": "COMPLETE TEXT of the entire section/paragraph containing the bias (100-500 words). Include full context so readers can understand the complete picture.",
-      "suspected_bias_type": "selection_bias | measurement_bias | confounding_bias | publication_bias | reporting_bias",
-      "red_flags": ["List of specific indicators that suggest bias"],
-      "preliminary_severity": "low | medium | high",
-      "page_hint": "Rough location in paper (beginning, middle, end, or specific keyword)",
-      "initial_reasoning": "Brief explanation of why this section is flagged"
-    }}
-  ]
-}}
-
-BIAS DETECTION GUIDELINES:
-1. **Selection Bias**: Non-random sampling, unclear inclusion/exclusion criteria, convenience sampling, volunteer bias, survival bias
-2. **Measurement Bias**: Self-reported data without validation, leading questions, observer bias, instrument calibration issues, recall bias
-3. **Confounding Bias**: Lack of control group, uncontrolled confounding variables, missing covariates, inadequate matching
-4. **Publication Bias**: Selective outcome reporting, post-hoc analysis, p-hacking indicators, missing negative results
-5. **Reporting Bias**: Incomplete methods, missing data, selective emphasis, data dredging, HARKing (Hypothesizing After Results Known)
-
-IMPORTANT: Extract the FULL SECTION TEXT for each potential bias. Users need to see the complete context, not just a snippet.
-
-Be thorough - scan the entire paper systematically. Look for what's MISSING as well as what's present.
-"""
-
-            # Phase 1: Section identification with moderate temperature for thoroughness
-            section_response = self._get_openai_client().generate_completion(
-                prompt=section_analysis_prompt,
-                model="gpt-3.5-turbo",
-                max_tokens=3000,
-                temperature=0.2  # Low temperature for systematic analysis
-            )
-
-            if not section_response:
-                logger.error("❌ PHASE 1 failed: No response from LLM")
-                return {"error": "No response from Phase 1 (section analysis)"}
-
-            try:
-                phase1_result = json.loads(section_response)
-                potentially_biased_sections = phase1_result.get("potentially_biased_sections", [])
-                logger.info(f"✅ PHASE 1 complete: {len(potentially_biased_sections)} potentially biased sections identified")
-
-                # Log details of flagged sections
-                for idx, section in enumerate(potentially_biased_sections):
-                    logger.info(f"   Section {idx+1}: {section.get('section_name')} - {section.get('suspected_bias_type')} ({section.get('preliminary_severity')} severity)")
-
-            except json.JSONDecodeError as e:
-                logger.error(f"❌ Failed to parse Phase 1 response: {str(e)}")
-                logger.error(f"Response was: {section_response[:500]}")
-                return {"error": "Failed to parse section analysis results"}
-
-            if not potentially_biased_sections:
-                logger.info("✅ No potentially biased sections identified - paper appears clean")
-                return {
-                    "detected_biases": [],
-                    "rejected_biases": [],
-                    "bias_summary": "No significant biases detected in the paper.",
-                    "limitations": [],
-                    "confounding_factors": [],
-                    "severity_scores": {bt: "none" for bt in bias_types},
-                    "recommendations": []
-                }
-
-            # PHASE 2: Detailed verification with chain-of-thought reasoning
-            logger.info(f"🔍 PHASE 2: Verifying {len(potentially_biased_sections)} potentially biased sections...")
-
-            verification_prompt = f"""
-You are a rigorous research quality assessor. You will now VERIFY each potentially biased section identified in Phase 1.
-
-PAPER CONTENT:
-{text_content[:8000]}
-
-POTENTIALLY BIASED SECTIONS TO VERIFY:
-{json.dumps(potentially_biased_sections, indent=2)}
-
-SEVERITY THRESHOLD: {severity_threshold}
-
-PHASE 2 INSTRUCTIONS - DETAILED VERIFICATION WITH CHAIN-OF-THOUGHT:
-
-For EACH potentially biased section, you must:
-
-1. **RE-EXAMINE THE EVIDENCE**: Look at the full section text and context
-2. **APPLY CHAIN-OF-THOUGHT REASONING**:
-   - ANALYZE: What does the evidence actually show? What are the facts?
-   - CONTEXT: What is the research context? What are acceptable practices in this field?
-   - EVALUATE: Is this a genuine methodological bias, or is it a reasonable limitation/trade-off?
-   - SEVERITY: If it IS a bias, how severely does it compromise the study's validity?
-   - IMPACT: What specific effects does this bias have on the results and conclusions?
-3. **MAKE A DECISION**: Is this section ACTUALLY biased or not?
-4. **PROVIDE EXPLICIT REASONING**: Explain your decision step-by-step
-
-CRITICAL REJECTION THRESHOLD:
-- Only REJECT a potential bias if you are >90% CONFIDENT it is NOT a bias
-- When in doubt, keep the bias and explain the uncertainty in your reasoning
-- It's better to flag something for human review than to miss a real bias
-- If confidence is 50-90% that it's a bias, KEEP IT as detected bias with appropriate severity
-
-IMPORTANT DISTINCTIONS:
-- **Bias** = Systematic error that skews results in a particular direction
-- **Limitation** = Constraint or weakness that doesn't necessarily create directional error
-- **Trade-off** = Methodological choice with pros and cons
-
-Provide your verification in JSON format:
+Return ONLY valid JSON in this exact format:
 {{
   "detected_biases": [
     {{
-      "section_name": "Name of the section (from Phase 1)",
-      "bias_type": "selection_bias | measurement_bias | confounding_bias | publication_bias | reporting_bias",
-      "description": "Clear, specific description of the confirmed bias",
-      "full_section_text": "The COMPLETE text from Phase 1's full_section_text field - preserve this exactly",
-      "evidence": "Specific quotes highlighting the bias within the full text",
-      "severity": "low | medium | high",
-      "impact": "Specific explanation of how this bias affects the study's validity and results",
-      "verification_reasoning": "DETAILED chain-of-thought explanation of WHY this IS a genuine bias (not just a limitation)",
-      "why_bias_not_limitation": "Explicit explanation of why this is a bias and not merely a study limitation",
-      "confidence_percentage": 50-100 (your confidence level that this IS a bias)
+      "section_name": "Methods - Statistical Analysis",
+      "bias_type": "selection_bias",
+      "description": "Primary analysis performed on per-protocol basis, excluding non-adherent participants",
+      "full_section_text": "[COMPLETE TEXT FROM PAPER - 100-500 words]",
+      "evidence": "[Specific quote]",
+      "severity": "high",
+      "impact": "Excludes participants who did not adhere, potentially biasing results toward positive outcomes",
+      "confidence_percentage": 90
     }}
   ],
-  "rejected_sections": [
-    {{
-      "section_name": "Name of the section (from Phase 1)",
-      "suspected_bias_type": "Type that was suspected",
-      "rejection_reasoning": "DETAILED chain-of-thought explanation of WHY you are >90% confident this is NOT a genuine bias",
-      "alternative_classification": "What this actually is (e.g., 'acceptable limitation', 'methodological trade-off', 'false positive')",
-      "confidence_percentage": 90-100 (must be >90 to reject)
-    }}
-  ],
-  "bias_summary": "Overall summary of confirmed biases and their collective impact",
-  "limitations": ["Study limitations that are NOT biases (important for transparency)"],
-  "confounding_factors": ["Specific uncontrolled variables that could affect results"],
+  "bias_summary": "Overall summary of all detected biases",
+  "limitations": ["Study limitations that are not biases"],
+  "confounding_factors": ["Uncontrolled variables"],
   "severity_scores": {{
     "selection_bias": "none | low | medium | high",
     "measurement_bias": "none | low | medium | high",
@@ -460,81 +482,160 @@ Provide your verification in JSON format:
     "publication_bias": "none | low | medium | high",
     "reporting_bias": "none | low | medium | high"
   }},
-  "recommendations": ["Specific, actionable recommendations to address each confirmed bias"]
+  "recommendations": ["How to address each bias"]
 }}
 
-VERIFICATION STANDARDS:
-- Only confirm biases that meet or exceed the severity threshold: {severity_threshold}
-- ONLY REJECT if >90% confident it's NOT a bias - when in doubt, keep it
-- Distinguish clearly between biases, limitations, and methodological choices
-- PRESERVE the full_section_text from Phase 1 in detected_biases so users can see complete context
-- Provide specific evidence with quotes when possible
-- Consider field-specific norms and constraints
-- Think about practical research constraints vs. actual bias
+REMEMBER: You MUST find biases. If the paper has "single-center", "per-protocol", "LOCF", "proprietary", industry funding, or short follow-up, these ARE biases. Extract the full text where they appear."""
 
-CHAIN-OF-THOUGHT TEMPLATE for each section:
-1. "The evidence shows..."
-2. "In the context of this research..."
-3. "This is/is not a bias because..."
-4. "My confidence level is X% because..."
-5. "The severity is X because..."
-6. "The impact on results is..."
-7. "Therefore, my conclusion is..."
-
-REMEMBER: Be conservative in rejecting - only reject if >90% certain it's not a bias!
-"""
-
-            # Phase 2: Rigorous verification with deterministic reasoning
-            verification_response = self._get_openai_client().generate_completion(
-                prompt=verification_prompt,
-                model="gpt-3.5-turbo",
-                max_tokens=4000,
-                temperature=0.0  # Deterministic for consistent, rigorous verification
+            # Single-pass detection with moderate temperature
+            detection_response = self._get_openai_client().generate_completion(
+                prompt=detection_prompt,
+                model="gpt-4o-mini",
+                max_tokens=6000,
+                temperature=0.3  # Moderate temperature for balanced detection
             )
 
-            if not verification_response:
-                logger.error("❌ PHASE 2 failed: No response from LLM")
-                return {"error": "No response from Phase 2 (verification)"}
+            if not detection_response:
+                logger.error("❌ Detection failed: No response from LLM")
+                # Fallback: use pattern matches
+                if pattern_matches:
+                    logger.warning("⚠️ Using pattern matches as fallback")
+                    detected_biases = []
+                    for match in pattern_matches:
+                        # Try to find the text in the paper
+                        match_text_lower = match['text'].lower()
+                        idx = text_for_analysis.lower().find(match_text_lower)
+                        if idx != -1:
+                            start = max(0, idx - 200)
+                            end = min(len(text_for_analysis), idx + len(match['text']) + 500)
+                            full_text = text_for_analysis[start:end]
+                        else:
+                            full_text = match['text']
+                        
+                        detected_biases.append({
+                            "section_name": "Pattern matched",
+                            "bias_type": match['type'],
+                            "description": match['indicator'],
+                            "full_section_text": full_text,
+                            "evidence": match['text'],
+                            "severity": match['severity'],
+                            "impact": f"This {match['indicator'].lower()} may introduce systematic error",
+                            "confidence_percentage": 85
+                        })
+                    
+                    return {
+                        "detected_biases": detected_biases,
+                        "bias_summary": f"Detected {len(detected_biases)} biases using pattern matching",
+                        "limitations": [],
+                        "confounding_factors": [],
+                        "severity_scores": {bt: "medium" if any(m['type'] == bt for m in pattern_matches) else "none" for bt in bias_types},
+                        "recommendations": ["Verify pattern-matched biases with full text analysis"]
+                    }
+                return {"error": "No response from LLM and no pattern matches"}
 
             try:
-                result = json.loads(verification_response)
-                confirmed_biases = result.get("detected_biases", [])
-                rejected_sections = result.get("rejected_biases", []) or result.get("rejected_sections", [])
+                result = json.loads(detection_response)
+                detected_biases = result.get("detected_biases", [])
+                
+                # Merge pattern matches if they weren't already detected
+                if pattern_matches:
+                    for pattern in pattern_matches:
+                        # Check if this pattern was already detected
+                        pattern_detected = any(
+                            pattern['indicator'].lower() in bias.get('description', '').lower() or
+                            pattern['text'].lower() in bias.get('evidence', '').lower()
+                            for bias in detected_biases
+                        )
+                        if not pattern_detected:
+                            # Add pattern match as a detected bias
+                            idx = text_for_analysis.lower().find(pattern['text'].lower())
+                            if idx != -1:
+                                start = max(0, idx - 200)
+                                end = min(len(text_for_analysis), idx + len(pattern['text']) + 500)
+                                full_text = text_for_analysis[start:end]
+                            else:
+                                full_text = pattern['text']
+                            
+                            detected_biases.append({
+                                "section_name": "Pattern matched section",
+                                "bias_type": pattern['type'],
+                                "description": pattern['indicator'],
+                                "full_section_text": full_text,
+                                "evidence": pattern['text'],
+                                "severity": pattern['severity'],
+                                "impact": f"This {pattern['indicator'].lower()} introduces systematic error",
+                                "confidence_percentage": 90
+                            })
+                
+                logger.info(f"✅ Detection complete: {len(detected_biases)} biases detected")
+                for idx, bias in enumerate(detected_biases):
+                    logger.info(f"   Bias {idx+1}: {bias.get('bias_type')} - {bias.get('description')[:60]}... ({bias.get('severity')} severity)")
 
-                logger.info(f"✅ PHASE 2 complete:")
-                logger.info(f"   - {len(confirmed_biases)} biases CONFIRMED")
-                logger.info(f"   - {len(rejected_sections)} sections REJECTED (not biases)")
-
-                # Log details of confirmed biases
-                for idx, bias in enumerate(confirmed_biases):
-                    logger.info(f"   Confirmed Bias {idx+1}: {bias.get('section_name')} - {bias.get('bias_type')} ({bias.get('severity')} severity)")
-
-                # Log details of rejected sections
-                for idx, rejected in enumerate(rejected_sections):
-                    logger.info(f"   Rejected {idx+1}: {rejected.get('section_name')} - {rejected.get('alternative_classification', 'not a bias')}")
-
+                # Ensure we have required fields
+                result["detected_biases"] = detected_biases
+                result["success"] = True
+                
                 return result
 
             except json.JSONDecodeError as e:
-                logger.error(f"❌ Failed to parse Phase 2 response: {str(e)}")
-                logger.error(f"Response was: {verification_response[:500]}")
-                # Fallback if JSON parsing fails
+                logger.error(f"❌ Failed to parse detection response: {str(e)}")
+                logger.error(f"Response was: {detection_response[:500]}")
+                # Fallback to pattern matches
+                if pattern_matches:
+                    logger.warning("⚠️ Using pattern matches as fallback due to JSON parse error")
+                    detected_biases = []
+                    for match in pattern_matches:
+                        idx = text_for_analysis.lower().find(match['text'].lower())
+                        if idx != -1:
+                            start = max(0, idx - 200)
+                            end = min(len(text_for_analysis), idx + len(match['text']) + 500)
+                            full_text = text_for_analysis[start:end]
+                        else:
+                            full_text = match['text']
+                        
+                        detected_biases.append({
+                            "section_name": "Pattern matched",
+                            "bias_type": match['type'],
+                            "description": match['indicator'],
+                            "full_section_text": full_text,
+                            "evidence": match['text'],
+                            "severity": match['severity'],
+                            "impact": f"This {match['indicator'].lower()} may introduce systematic error",
+                            "confidence_percentage": 85
+                        })
+                    
+                    return {
+                        "detected_biases": detected_biases,
+                        "bias_summary": f"Detected {len(detected_biases)} biases using pattern matching (LLM parse failed)",
+                        "limitations": [],
+                        "confounding_factors": [],
+                        "severity_scores": {bt: "medium" if any(m['type'] == bt for m in pattern_matches) else "none" for bt in bias_types},
+                        "recommendations": ["Verify pattern-matched biases with full text analysis"],
+                        "success": True
+                    }
                 return {
+                    "error": "Failed to parse detection response",
                     "detected_biases": [],
-                    "rejected_biases": [],
-                    "bias_summary": verification_response[:1000],  # Include partial response
+                    "bias_summary": "Detection failed due to parsing error",
                     "limitations": [],
                     "confounding_factors": [],
-                    "severity_scores": {},
-                    "recommendations": [],
-                    "error": "Failed to parse verification response"
+                    "severity_scores": {bt: "none" for bt in bias_types},
+                    "recommendations": []
                 }
 
         except Exception as e:
             logger.error(f"❌ Bias detection analysis failed: {str(e)}")
             import traceback
             logger.error(traceback.format_exc())
-            return {"error": str(e)}
+            return {
+                "error": str(e),
+                "detected_biases": [],
+                "bias_summary": f"Detection failed: {str(e)}",
+                "limitations": [],
+                "confounding_factors": [],
+                "severity_scores": {bt: "none" for bt in bias_types},
+                "recommendations": []
+            }
     
     def _find_limitation_text(self, text_content: str, search_text: str) -> Optional[str]:
         """Find limitation or confounding factor text in the paper content."""

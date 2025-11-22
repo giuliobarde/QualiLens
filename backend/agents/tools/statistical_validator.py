@@ -16,6 +16,10 @@ sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(
 
 from LLM.openai_client import OpenAIClient
 
+# Import tool result cache
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+from tool_result_cache import ToolResultCache
+
 logger = logging.getLogger(__name__)
 
 
@@ -27,6 +31,7 @@ class StatisticalValidatorTool(BaseTool):
     def __init__(self):
         super().__init__()
         self.openai_client = None
+        self.result_cache = ToolResultCache()
     
     def _get_openai_client(self):
         """Get OpenAI client, initializing it lazily if needed."""
@@ -83,8 +88,32 @@ class StatisticalValidatorTool(BaseTool):
         try:
             logger.info("Validating statistics with comprehensive level")
             
-            # Always use comprehensive statistical validation
-            validation_result = self._validate_comprehensive_statistics(text_content, statistical_tests)
+            # Check cache first
+            cache_key_params = {
+                "validation_level": validation_level,
+                "statistical_tests": statistical_tests or []
+            }
+            cached_result = self.result_cache.get_cached_result(
+                "statistical_validator_tool",
+                text_content,
+                **cache_key_params
+            )
+            
+            if cached_result:
+                logger.info("✅ Using cached statistical validation result")
+                validation_result = cached_result
+            else:
+                # Always use comprehensive statistical validation
+                validation_result = self._validate_comprehensive_statistics(text_content, statistical_tests)
+                
+                # Cache the result (before evidence collection)
+                if validation_result.get("success"):
+                    self.result_cache.cache_result(
+                        "statistical_validator_tool",
+                        text_content,
+                        validation_result,
+                        **cache_key_params
+                    )
             
             # Collect evidence if evidence_collector is provided
             if evidence_collector:
@@ -465,7 +494,7 @@ Provide the most comprehensive statistical validation possible.
             
             llm_response = self._get_openai_client().generate_completion(
                 prompt=prompt,
-                model="gpt-3.5-turbo",
+                model="gpt-4o-mini",
                 max_tokens=2500,
                 temperature=0.0  # Deterministic for consistency
             )

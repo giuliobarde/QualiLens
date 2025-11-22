@@ -155,7 +155,7 @@ class PaperAnalyzerTool(BaseTool):
             # Use LLM to extract structured data
             llm_response = self._get_openai_client().generate_completion(
                 prompt=extraction_prompt,
-                model="gpt-3.5-turbo",
+                model="gpt-4o-mini",
                 max_tokens=2000
             )
             
@@ -423,7 +423,7 @@ Extract relevant information for this section in JSON format:
                 
                 llm_response = self._get_openai_client().generate_completion(
                     prompt=prompt,
-                    model="gpt-3.5-turbo",
+                    model="gpt-4o-mini",
                     max_tokens=1000
                 )
                 
@@ -483,7 +483,7 @@ Focus on clarity, accuracy, and highlighting the most important aspects.
             
             llm_response = self._get_openai_client().generate_completion(
                 prompt=prompt,
-                model="gpt-3.5-turbo",
+                model="gpt-4o-mini",
                 max_tokens=1500
             )
             
@@ -537,7 +537,7 @@ Focus on discoveries that are novel, significant, or have important implications
             
             llm_response = self._get_openai_client().generate_completion(
                 prompt=prompt,
-                model="gpt-3.5-turbo",
+                model="gpt-4o-mini",
                 max_tokens=1500
             )
             
@@ -578,7 +578,7 @@ Provide methodology analysis in JSON format:
             
             llm_response = self._get_openai_client().generate_completion(
                 prompt=prompt,
-                model="gpt-3.5-turbo",
+                model="gpt-4o-mini",
                 max_tokens=1200
             )
             
@@ -619,7 +619,7 @@ Provide results analysis in JSON format:
             
             llm_response = self._get_openai_client().generate_completion(
                 prompt=prompt,
-                model="gpt-3.5-turbo",
+                model="gpt-4o-mini",
                 max_tokens=1200
             )
             
@@ -672,7 +672,7 @@ Provide quality assessment in JSON format:
             
             llm_response = self._get_openai_client().generate_completion(
                 prompt=prompt,
-                model="gpt-3.5-turbo",
+                model="gpt-4o-mini",
                 max_tokens=1200
             )
             

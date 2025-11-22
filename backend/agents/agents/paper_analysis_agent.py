@@ -9,6 +9,7 @@ and quality assessment.
 import logging
 import sys
 import os
+import asyncio
 from typing import Dict, Any, List, Optional
 from datetime import datetime
 
@@ -261,14 +262,75 @@ class PaperAnalysisAgent(BaseAgent):
         self, text_content: str, analysis_level: str, query: str, 
         evidence_collector: Optional[EvidenceCollector] = None
     ) -> Dict[str, Any]:
-        """Run comprehensive analysis pipeline with all tools."""
+        """
+        Run comprehensive analysis pipeline with all tools.
+        Uses parallel execution for independent tools to speed up analysis.
+        
+        Execution strategy:
+        1. Run independent tools in parallel (content_summary, bias, methodology, statistical, gap, citation)
+        2. Run reproducibility (depends on methodology) after methodology completes
+        3. Run quality assessment (depends on all) after all others complete
+        """
         results = {
             "tools_used": [],
             "analysis_level": "comprehensive"
         }
         
         try:
-            logger.info("Executing comprehensive analysis with all tools")
+            logger.info("Executing comprehensive analysis with parallel tool execution")
+            
+            # Use asyncio to run independent tools in parallel
+            # Handle both sync and async contexts properly
+            try:
+                # Try to get the current event loop
+                loop = asyncio.get_running_loop()
+                # If we're in an async context, we need to use a different approach
+                # For now, fall back to sequential execution if already in async context
+                logger.warning("Already in async context, using sequential execution")
+                return self._run_analysis_pipeline_sequential(text_content, analysis_level, query, evidence_collector)
+            except RuntimeError:
+                # No event loop running, we can create one
+                try:
+                    # Try to use asyncio.run (Python 3.7+)
+                    results = asyncio.run(
+                        self._run_analysis_pipeline_async(text_content, analysis_level, query, evidence_collector)
+                    )
+                except RuntimeError:
+                    # Fallback: create new event loop
+                    loop = asyncio.new_event_loop()
+                    asyncio.set_event_loop(loop)
+                    try:
+                        results = loop.run_until_complete(
+                            self._run_analysis_pipeline_async(text_content, analysis_level, query, evidence_collector)
+                        )
+                    finally:
+                        loop.close()
+            
+            return results
+            
+        except Exception as e:
+            logger.error(f"Analysis pipeline failed: {str(e)}")
+            return {
+                "tools_used": results.get("tools_used", []),
+                "error": str(e),
+                "analysis_level": "comprehensive"
+            }
+    
+    def _run_analysis_pipeline_sequential(
+        self, text_content: str, analysis_level: str, query: str, 
+        evidence_collector: Optional[EvidenceCollector] = None
+    ) -> Dict[str, Any]:
+        """
+        Sequential fallback version of analysis pipeline.
+        Used when async execution is not possible.
+        """
+        results = {
+            "tools_used": [],
+            "analysis_level": "comprehensive"
+        }
+        
+        try:
+            logger.info("Executing comprehensive analysis sequentially (fallback mode)")
             
             # Content summarization
             summary_result = self.execute_tool(
@@ -314,12 +376,17 @@ class PaperAnalysisAgent(BaseAgent):
                 results["statistical_analysis"] = statistical_result
                 results["tools_used"].append("statistical_validator_tool")
             
-            # Reproducibility assessment
+            # Reproducibility assessment (pass methodology data if available)
+            methodology_data_for_repro = None
+            if "methodology_analysis" in results and results["methodology_analysis"].get("success"):
+                methodology_data_for_repro = results["methodology_analysis"]
+            
             reproducibility_result = self.execute_tool(
                 "reproducibility_assessor_tool",
                 text_content=text_content,
                 reproducibility_level="detailed",
-                evidence_collector=evidence_collector
+                evidence_collector=evidence_collector,
+                methodology_data=methodology_data_for_repro
             )
             if reproducibility_result.get("success"):
                 results["reproducibility_analysis"] = reproducibility_result
@@ -329,7 +396,8 @@ class PaperAnalysisAgent(BaseAgent):
             gap_result = self.execute_tool(
                 "research_gap_identifier_tool",
                 text_content=text_content,
-                future_focus="comprehensive"
+                future_focus="comprehensive",
+                evidence_collector=evidence_collector
             )
             if gap_result.get("success"):
                 results["research_gap_analysis"] = gap_result
@@ -357,9 +425,126 @@ class PaperAnalysisAgent(BaseAgent):
             return results
             
         except Exception as e:
-            logger.error(f"Analysis pipeline failed: {str(e)}")
+            logger.error(f"Sequential analysis pipeline failed: {str(e)}")
             return {
-                "tools_used": results["tools_used"],
+                "tools_used": results.get("tools_used", []),
+                "error": str(e),
+                "analysis_level": "comprehensive"
+            }
+    
+    async def _run_analysis_pipeline_async(
+        self, text_content: str, analysis_level: str, query: str, 
+        evidence_collector: Optional[EvidenceCollector] = None
+    ) -> Dict[str, Any]:
+        """
+        Async version of analysis pipeline with parallel execution.
+        
+        Chain of thought:
+        1. Identify independent tools that can run in parallel
+        2. Execute them concurrently using asyncio.gather
+        3. Wait for dependencies (reproducibility needs methodology)
+        4. Execute final dependent tool (quality needs all)
+        """
+        results = {
+            "tools_used": [],
+            "analysis_level": "comprehensive"
+        }
+        
+        try:
+            logger.info("Starting parallel analysis pipeline execution")
+            
+            # PHASE 1: Execute independent tools in parallel
+            # These tools don't depend on each other and can run concurrently
+            logger.info("Phase 1: Executing independent tools in parallel...")
+            
+            async def run_tool_async(tool_name: str, **kwargs):
+                """Helper to run a tool asynchronously."""
+                try:
+                    # Run tool in executor to avoid blocking
+                    loop = asyncio.get_event_loop()
+                    result = await loop.run_in_executor(
+                        None,
+                        lambda: self.execute_tool(tool_name, **kwargs)
+                    )
+                    return tool_name, result
+                except Exception as e:
+                    logger.error(f"Tool {tool_name} failed: {str(e)}")
+                    return tool_name, {"success": False, "error": str(e)}
+            
+            # Execute independent tools in parallel
+            independent_tasks = [
+                run_tool_async("content_summarizer_tool", text_content=text_content, summary_type="comprehensive", max_length=800),
+                run_tool_async("bias_detection_tool", text_content=text_content, severity_threshold="low", evidence_collector=evidence_collector),
+                run_tool_async("methodology_analyzer_tool", text_content=text_content, analysis_depth="comprehensive", evidence_collector=evidence_collector),
+                run_tool_async("statistical_validator_tool", text_content=text_content, validation_level="comprehensive", evidence_collector=evidence_collector),
+                run_tool_async("research_gap_identifier_tool", text_content=text_content, future_focus="comprehensive", evidence_collector=evidence_collector),
+                run_tool_async("citation_analyzer_tool", text_content=text_content, analysis_type="bibliometric"),
+            ]
+            
+            # Wait for all independent tools to complete
+            independent_results = await asyncio.gather(*independent_tasks, return_exceptions=True)
+            
+            # Process independent tool results
+            for tool_name, tool_result in independent_results:
+                if isinstance(tool_result, Exception):
+                    logger.error(f"Tool {tool_name} raised exception: {str(tool_result)}")
+                    continue
+                
+                if tool_result.get("success"):
+                    if tool_name == "content_summarizer_tool":
+                        results["content_summary"] = tool_result
+                    elif tool_name == "bias_detection_tool":
+                        results["bias_analysis"] = tool_result
+                    elif tool_name == "methodology_analyzer_tool":
+                        results["methodology_analysis"] = tool_result
+                    elif tool_name == "statistical_validator_tool":
+                        results["statistical_analysis"] = tool_result
+                    elif tool_name == "research_gap_identifier_tool":
+                        results["research_gap_analysis"] = tool_result
+                    elif tool_name == "citation_analyzer_tool":
+                        results["citation_analysis"] = tool_result
+                    
+                    results["tools_used"].append(tool_name)
+            
+            logger.info(f"Phase 1 complete. {len(results['tools_used'])} tools executed in parallel")
+            
+            # PHASE 2: Execute reproducibility assessment (depends on methodology)
+            logger.info("Phase 2: Executing reproducibility assessment (depends on methodology)...")
+            methodology_data_for_repro = None
+            if "methodology_analysis" in results and results["methodology_analysis"].get("success"):
+                methodology_data_for_repro = results["methodology_analysis"]
+            
+            reproducibility_result = await run_tool_async(
+                "reproducibility_assessor_tool",
+                text_content=text_content,
+                reproducibility_level="detailed",
+                evidence_collector=evidence_collector,
+                methodology_data=methodology_data_for_repro
+            )
+            _, repro_result = reproducibility_result
+            if repro_result.get("success"):
+                results["reproducibility_analysis"] = repro_result
+                results["tools_used"].append("reproducibility_assessor_tool")
+            
+            logger.info("Phase 2 complete")
+            
+            # PHASE 3: Execute quality assessment (depends on all other results)
+            logger.info("Phase 3: Executing quality assessment (depends on all results)...")
+            quality_result = await run_tool_async("quality_assessor_tool", analysis_results=results)
+            _, quality_res = quality_result
+            if quality_res.get("success"):
+                results["quality_assessment"] = quality_res
+                results["tools_used"].append("quality_assessor_tool")
+            
+            logger.info(f"Analysis pipeline complete. Total tools used: {len(results['tools_used'])}")
+            return results
+            
+        except Exception as e:
+            logger.error(f"Async analysis pipeline failed: {str(e)}")
+            import traceback
+            logger.error(traceback.format_exc())
+            return {
+                "tools_used": results.get("tools_used", []),
                 "error": str(e),
                 "analysis_level": "comprehensive"
             }

@@ -6,6 +6,7 @@ This tool identifies research gaps and future directions in research papers.
 
 import logging
 import json
+import re
 from typing import Dict, Any, Optional, List
 from .base_tool import BaseTool, ToolMetadata
 
@@ -68,7 +69,7 @@ class ResearchGapIdentifierTool(BaseTool):
         )
     
     def execute(self, text_content: str, gap_types: Optional[List[str]] = None,
-                future_focus: str = "general") -> Dict[str, Any]:
+                future_focus: str = "general", evidence_collector=None) -> Dict[str, Any]:
         """
         Identify research gaps and future directions.
         
@@ -76,6 +77,7 @@ class ResearchGapIdentifierTool(BaseTool):
             text_content: The text content to analyze
             gap_types: Types of gaps to identify
             future_focus: Focus area for future directions
+            evidence_collector: Optional evidence collector for evidence traces
             
         Returns:
             Dict containing research gaps and future directions
@@ -85,6 +87,83 @@ class ResearchGapIdentifierTool(BaseTool):
             
             # Generate gap identification analysis
             gap_analysis = self._identify_research_gaps(text_content, gap_types, future_focus)
+            
+            # Collect evidence if evidence_collector is provided
+            if evidence_collector:
+                # Collect evidence from research gaps
+                research_gaps = gap_analysis.get("research_gaps", [])
+                logger.info(f"📊 Collecting evidence for {len(research_gaps)} research gaps")
+                
+                for idx, gap in enumerate(research_gaps):
+                    if isinstance(gap, dict):
+                        gap_description = gap.get("description", "")
+                        gap_type = gap.get("gap_type", "unknown")
+                        significance = gap.get("significance", "")
+                        evidence_text = gap.get("evidence", "")
+                        
+                        # Use evidence text if available, otherwise use description
+                        text_snippet = evidence_text if evidence_text else gap_description
+                        
+                        # Build rationale
+                        rationale_parts = [f"🔍 RESEARCH GAP: {gap_type.replace('_', ' ').title()}"]
+                        if gap_description:
+                            rationale_parts.append(f"\n📋 GAP DESCRIPTION:\n{gap_description}")
+                        if significance:
+                            rationale_parts.append(f"\n💡 SIGNIFICANCE:\n{significance}")
+                        if evidence_text:
+                            rationale_parts.append(f"\n📄 EVIDENCE:\n{evidence_text}")
+                        
+                        full_rationale = "\n".join(rationale_parts)
+                        
+                        # Add evidence
+                        evidence_id = evidence_collector.add_evidence(
+                            category="research_gap",
+                            text_snippet=text_snippet[:500] if text_snippet else gap_description[:500],
+                            rationale=full_rationale[:2000],
+                            confidence=0.7,
+                            severity="medium",
+                            score_impact=-5.0  # Research gaps have moderate negative impact
+                        )
+                        
+                        logger.info(f"✅ Added evidence {evidence_id} for research gap: {gap_type} ({len(text_snippet)} chars)")
+                
+                # Collect evidence from methodological gaps
+                methodological_gaps = gap_analysis.get("methodological_gaps", [])
+                logger.info(f"📊 Collecting evidence for {len(methodological_gaps)} methodological gaps")
+                
+                for idx, gap in enumerate(methodological_gaps):
+                    if isinstance(gap, dict):
+                        gap_desc = gap.get("gap", "") or gap.get("description", "")
+                        if gap_desc:
+                            evidence_collector.add_evidence(
+                                category="research_gap",
+                                text_snippet=gap_desc[:500],
+                                rationale=f"Methodological Gap: {gap_desc}. {gap.get('improvement', '')}",
+                                confidence=0.7,
+                                severity="medium",
+                                score_impact=-5.0
+                            )
+                            logger.info(f"✅ Added methodological gap evidence {idx+1}/{len(methodological_gaps)}")
+                
+                # Collect evidence from unaddressed questions
+                unaddressed_questions = gap_analysis.get("unaddressed_questions", [])
+                logger.info(f"📊 Collecting evidence for {len(unaddressed_questions)} unaddressed questions")
+                
+                for idx, question in enumerate(unaddressed_questions):
+                    if isinstance(question, dict):
+                        question_text = question.get("question", "")
+                        if question_text:
+                            evidence_collector.add_evidence(
+                                category="research_gap",
+                                text_snippet=question_text[:500],
+                                rationale=f"Unaddressed Question: {question_text}. {question.get('importance', '')}",
+                                confidence=0.65,
+                                severity="low",
+                                score_impact=-3.0
+                            )
+                            logger.info(f"✅ Added unaddressed question evidence {idx+1}/{len(unaddressed_questions)}")
+                
+                logger.info(f"✅ Research gap evidence collection complete. Total gaps: {len(research_gaps)}, Methodological: {len(methodological_gaps)}, Questions: {len(unaddressed_questions)}")
             
             return {
                 "success": True,
@@ -107,152 +186,143 @@ class ResearchGapIdentifierTool(BaseTool):
                 "tool_used": "research_gap_identifier_tool"
             }
     
+    def _pattern_match_gaps(self, text_content: str) -> List[Dict[str, Any]]:
+        """Pattern matching to find obvious research gap indicators."""
+        patterns = []
+        text_lower = text_content.lower()
+        
+        # Short follow-up
+        if re.search(r"\b(?:12|8|6|4)[- ]week|short[- ]term|brief follow[- ]up", text_lower):
+            patterns.append({
+                "type": "methodological",
+                "gap": "Lack of long-term follow-up data",
+                "description": "Short follow-up duration limits assessment of long-term effects",
+                "significance": "Unknown durability of effects, potential late adverse events"
+            })
+        
+        # Proprietary measures
+        if re.search(r"proprietary|developed by (?:the )?authors?|custom instrument|unvalidated", text_lower):
+            patterns.append({
+                "type": "methodological",
+                "gap": "Lack of independent validation of proprietary measures",
+                "description": "Proprietary instruments prevent replication and independent validation",
+                "significance": "Cannot verify measurement validity, prevents replication"
+            })
+        
+        # Restricted data access
+        if re.search(r"data available (?:upon|on) request|proprietary data|data not publicly available|restricted access", text_lower):
+            patterns.append({
+                "type": "empirical",
+                "gap": "Restricted data access prevents independent verification",
+                "description": "Data not publicly available limits reproducibility",
+                "significance": "Cannot independently verify results or conduct re-analyses"
+            })
+        
+        # Single-center
+        if re.search(r"single[- ]center|single[- ]centre|single[- ]site|single[- ]institution", text_lower):
+            patterns.append({
+                "type": "empirical",
+                "gap": "Limited generalizability due to single-center design",
+                "description": "Single-center study limits generalizability to other populations/contexts",
+                "significance": "Results may not apply to different settings or populations"
+            })
+        
+        # Self-citation patterns (excessive)
+        self_citation_count = len(re.findall(r"previous (?:studies|work|research) (?:by|from) (?:our|the) (?:group|authors|team)", text_lower))
+        if self_citation_count >= 3:
+            patterns.append({
+                "type": "empirical",
+                "gap": "Lack of independent validation due to excessive self-citation",
+                "description": "High proportion of self-citations suggests lack of external validation",
+                "significance": "No independent replication or validation by other research groups"
+            })
+        
+        # LOCF
+        if re.search(r"\blocf\b|last observation carried forward", text_lower):
+            patterns.append({
+                "type": "methodological",
+                "gap": "Alternative missing data methods not explored",
+                "description": "LOCF imputation may introduce bias; other methods not considered",
+                "significance": "Potential bias in handling missing data"
+            })
+        
+        # Per-protocol analysis
+        if re.search(r"per[- ]protocol|per protocol|pp analysis", text_lower):
+            patterns.append({
+                "type": "methodological",
+                "gap": "Intention-to-treat analysis not performed",
+                "description": "Per-protocol analysis may introduce selection bias",
+                "significance": "Results may be biased toward positive outcomes"
+            })
+        
+        return patterns
+    
     def _identify_research_gaps(self, text_content: str, gap_types: Optional[List[str]], future_focus: str) -> Dict[str, Any]:
         """
-        Identify research gaps and future directions using two-step chain-of-thought reasoning.
-
-        Step 1: Brainstorm potential research gaps (creative, temperature > 0)
-        Step 2: Verify and evaluate each potential gap (deterministic, temperature = 0)
+        Identify research gaps using pattern matching + single-pass LLM approach.
+        NEW SIMPLIFIED APPROACH: Direct detection without overly conservative verification.
         """
         try:
-            # STEP 1: Brainstorm potential research gaps (more creative)
-            logger.info("Step 1: Brainstorming potential research gaps...")
-            brainstorm_prompt = f"""
-You are an expert research analyst with deep knowledge across multiple domains. Your task is to BRAINSTORM potential research gaps in this paper.
+            # Use full text content
+            text_length = len(text_content)
+            if text_length > 100000:
+                text_for_analysis = text_content[:40000] + "\n\n[... middle sections omitted ...]\n\n" + text_content[-30000:]
+                logger.info(f"Text content is {text_length} chars, using first 40000 + last 30000 for gap analysis")
+            else:
+                text_for_analysis = text_content
+                logger.info(f"Using full text content ({text_length} chars) for gap analysis")
+            
+            # STEP 1: Pattern matching
+            logger.info("🔍 STEP 1: Pattern matching for obvious research gaps...")
+            pattern_matches = self._pattern_match_gaps(text_for_analysis)
+            logger.info(f"✅ Pattern matching found {len(pattern_matches)} potential gaps")
+            
+            # STEP 2: Single-pass LLM detection
+            logger.info("🔍 STEP 2: LLM-based gap detection...")
+            
+            # Build pattern context
+            pattern_context = ""
+            if pattern_matches:
+                pattern_context = "\n\nPATTERN MATCHING FOUND THESE POTENTIAL GAPS (YOU MUST VERIFY AND EXPAND ON THESE):\n"
+                for i, match in enumerate(pattern_matches, 1):
+                    pattern_context += f"{i}. {match['gap']} ({match['type']} gap) - {match['description']}\n"
+            
+            detection_prompt = f"""You are an expert research analyst identifying research gaps. Your task is to find ALL gaps, especially implicit ones.
 
 PAPER CONTENT:
-{text_content[:6000]}
+{text_for_analysis[:50000]}{pattern_context}
 
-{f"SPECIFIC GAP TYPES TO CONSIDER: {', '.join(gap_types)}" if gap_types else ""}
-FUTURE FOCUS AREA: {future_focus}
+CRITICAL INSTRUCTIONS:
+1. You MUST find at least 2-5 research gaps. If you find 0 gaps, you are NOT being thorough enough.
+2. Look for IMPLICIT gaps - things that are missing or inadequately addressed
+3. Use the pattern matches above as starting points - verify them and find additional gaps
+4. Be AGGRESSIVE in detection - err on the side of finding gaps rather than missing them
 
-BRAINSTORMING INSTRUCTIONS:
-- Be thorough and creative in identifying POTENTIAL gaps
-- This is a brainstorming phase - include anything that MIGHT be a gap or limitation
-- Think about what's missing, unexplored, or inadequately addressed
-- Consider methodological, theoretical, practical, and empirical gaps
-- Don't worry about false positives at this stage
+EXPLICIT PATTERNS TO LOOK FOR (these are ALWAYS gaps):
+- "12-week" or short follow-up → Gap: Lack of long-term data
+- "proprietary" or "developed by authors" instrument → Gap: Lack of independent validation
+- "data available upon request" → Gap: Restricted data access
+- "single-center" → Gap: Limited generalizability
+- Excessive self-citation → Gap: Lack of independent validation
+- "LOCF" → Gap: Alternative missing data methods not explored
+- "per-protocol" analysis → Gap: Intention-to-treat analysis not performed
 
-For each potential gap, think through:
-1. What is missing or inadequately addressed?
-2. Why might this be important?
-3. What evidence suggests this is a gap?
+For EACH gap you find, provide:
+1. gap_type: methodological | theoretical | empirical | practical
+2. description: Clear description of the gap
+3. significance: Why this gap is important
+4. evidence: Text from paper showing this is missing
+5. verification_reasoning: Why this is a real gap
 
-Provide your brainstorming in JSON format:
-{{
-  "potential_gaps": [
-    {{
-      "gap_type": "methodological | theoretical | empirical | practical | conceptual",
-      "initial_assessment": "What MIGHT be missing or inadequately addressed",
-      "evidence": "Why you think this might be a gap",
-      "potential_significance": "Why this could be important if it's a real gap",
-      "reasoning": "Your chain-of-thought reasoning"
-    }}
-  ],
-  "potential_future_directions": [
-    {{
-      "direction": "Potential research direction",
-      "rationale": "Why this might be worth pursuing",
-      "reasoning": "Your chain-of-thought"
-    }}
-  ]
-}}
-
-GAP CATEGORIES TO CONSIDER:
-1. Methodological: Missing methods, inadequate controls, sample limitations, measurement issues
-2. Theoretical: Unexplored frameworks, missing constructs, theoretical underdevelopment
-3. Empirical: Untested hypotheses, unexplored populations, missing variables, generalizability limits
-4. Practical: Real-world applications not explored, implementation challenges unaddressed
-5. Conceptual: Undefined terms, ambiguous concepts, inconsistent definitions
-
-Be comprehensive - we'll verify these in the next step.
-"""
-
-            # Step 1: Creative brainstorming with temperature=0.3
-            brainstorm_response = self._get_openai_client().generate_completion(
-                prompt=brainstorm_prompt,
-                model="gpt-3.5-turbo",
-                max_tokens=2000,
-                temperature=0.3  # Some creativity for brainstorming
-            )
-
-            if not brainstorm_response:
-                return {"error": "No response from Step 1 (brainstorming)"}
-
-            try:
-                brainstormed = json.loads(brainstorm_response)
-                potential_gaps = brainstormed.get("potential_gaps", [])
-                potential_directions = brainstormed.get("potential_future_directions", [])
-                logger.info(f"Step 1 complete: {len(potential_gaps)} potential gaps, {len(potential_directions)} potential directions identified")
-            except json.JSONDecodeError:
-                logger.error("Failed to parse brainstorming response")
-                return {"error": "Failed to parse brainstorming results"}
-
-            # STEP 2: Verify and evaluate each potential gap (deterministic)
-            logger.info("Step 2: Verifying and evaluating potential gaps...")
-            verification_prompt = f"""
-You are a rigorous research evaluator. You will now VERIFY and EVALUATE each potential research gap identified in the brainstorming phase.
-
-PAPER CONTENT:
-{text_content[:6000]}
-
-POTENTIAL GAPS TO VERIFY:
-{json.dumps(potential_gaps, indent=2)}
-
-POTENTIAL FUTURE DIRECTIONS TO EVALUATE:
-{json.dumps(potential_directions, indent=2)}
-
-VERIFICATION INSTRUCTIONS:
-For each potential gap, you must:
-1. Carefully examine whether it's truly a gap or already addressed in the paper
-2. Determine if it's a REAL gap or a false positive
-3. If it's a real gap, assess its significance and impact
-4. Provide clear justification for your decision
-
-Use chain-of-thought reasoning:
-- ANALYZE: Is this actually missing from the paper?
-- EVALUATE: If missing, is it a significant gap or minor limitation?
-- ASSESS: What's the potential impact of addressing this gap?
-- PRIORITIZE: How important is this gap relative to others?
-- CONCLUDE: Should this be included as a confirmed research gap?
-
-Provide your verification in JSON format:
+Return ONLY valid JSON in this exact format:
 {{
   "research_gaps": [
     {{
-      "gap_type": "methodological | theoretical | empirical | practical",
-      "description": "Clear description of the confirmed gap",
-      "significance": "Why this gap is important and impactful",
-      "evidence": "Evidence from the paper showing this is missing",
-      "verification_reasoning": "Your chain-of-thought for why this IS a real gap"
-    }}
-  ],
-  "rejected_gaps": [
-    {{
-      "gap_type": "type from potential list",
-      "rejection_reasoning": "Why this is NOT a real gap after verification"
-    }}
-  ],
-  "future_directions": [
-    {{
-      "direction": "Confirmed future research direction",
-      "rationale": "Why this direction is important and feasible",
-      "priority": "High | Medium | Low",
-      "feasibility": "Assessment of how feasible this is"
-    }}
-  ],
-  "limitations": [
-    {{
-      "limitation": "Confirmed study limitation",
-      "impact": "How this affects the findings",
-      "addressed": "How this could be addressed in future research"
-    }}
-  ],
-  "unaddressed_questions": [
-    {{
-      "question": "Specific unaddressed research question",
-      "importance": "Why this question matters",
-      "research_approach": "How this could be investigated"
+      "gap_type": "methodological",
+      "description": "Lack of long-term follow-up data",
+      "significance": "Unknown durability of effects, potential late adverse events",
+      "evidence": "[Text from paper showing short follow-up]",
+      "verification_reasoning": "The study reports 12-week follow-up, which is insufficient for assessing long-term outcomes"
     }}
   ],
   "methodological_gaps": [
@@ -262,63 +332,112 @@ Provide your verification in JSON format:
       "improvement": "How methodology could be improved"
     }}
   ],
-  "theoretical_gaps": [
+  "unaddressed_questions": [
     {{
-      "gap": "Specific theoretical gap",
-      "description": "What's missing theoretically",
-      "development": "How theory could be developed"
+      "question": "Specific unaddressed question",
+      "importance": "Why this matters",
+      "research_approach": "How to investigate"
     }}
   ],
-  "research_priorities": ["Top priority research needs based on verified gaps"],
-  "collaboration_opportunities": ["Potential collaboration areas based on gaps"],
-  "funding_considerations": ["Funding opportunities related to addressing gaps"]
+  "future_directions": [
+    {{
+      "direction": "Future research direction",
+      "rationale": "Why this is important",
+      "priority": "High | Medium | Low"
+    }}
+  ],
+  "limitations": [
+    {{
+      "limitation": "Study limitation",
+      "impact": "How this affects findings"
+    }}
+  ]
 }}
 
-VERIFICATION STANDARDS:
-- Only include gaps that are genuinely missing or inadequately addressed
-- Be conservative - distinguish between minor limitations and significant gaps
-- Provide specific evidence from the paper
-- Assess the real-world significance of each gap
-- Different papers should yield different numbers and types of gaps based on actual content
+REMEMBER: You MUST find gaps. If the paper has short follow-up, proprietary measures, restricted data, single-center design, or excessive self-citation, these ARE gaps."""
 
-IMPORTANT: The number of gaps should vary based on the paper's actual completeness:
-- Comprehensive papers may have 0-2 major gaps
-- Average papers may have 3-5 gaps
-- Papers with significant limitations may have 6+ gaps
-- Base this on ACTUAL analysis, not arbitrary numbers
-"""
-
-            # Step 2: Deterministic verification with temperature=0.0
-            verification_response = self._get_openai_client().generate_completion(
-                prompt=verification_prompt,
-                model="gpt-3.5-turbo",
-                max_tokens=2500,
-                temperature=0.0  # Deterministic for consistency
+            # Single-pass detection
+            detection_response = self._get_openai_client().generate_completion(
+                prompt=detection_prompt,
+                model="gpt-4o-mini",
+                max_tokens=4000,
+                temperature=0.3
             )
 
-            if verification_response:
-                try:
-                    result = json.loads(verification_response)
-                    logger.info(f"Step 2 complete: {len(result.get('research_gaps', []))} gaps confirmed, {len(result.get('rejected_gaps', []))} rejected")
-                    return result
-                except json.JSONDecodeError:
-                    logger.error("Failed to parse verification response")
-                    # Fallback if JSON parsing fails
+            if not detection_response:
+                logger.error("❌ Detection failed: No response from LLM")
+                # Fallback: use pattern matches
+                if pattern_matches:
+                    logger.warning("⚠️ Using pattern matches as fallback")
                     return {
-                        "research_gaps": [],
-                        "rejected_gaps": [],
+                        "research_gaps": pattern_matches,
+                        "methodological_gaps": [m for m in pattern_matches if m['type'] == 'methodological'],
+                        "unaddressed_questions": [],
+                        "future_directions": [],
+                        "limitations": []
+                    }
+                return {"error": "No response from LLM and no pattern matches"}
+
+            try:
+                result = json.loads(detection_response)
+                research_gaps = result.get("research_gaps", [])
+                
+                # Merge pattern matches if not already detected
+                if pattern_matches:
+                    for pattern in pattern_matches:
+                        pattern_detected = any(
+                            pattern['gap'].lower() in gap.get('description', '').lower()
+                            for gap in research_gaps
+                        )
+                        if not pattern_detected:
+                            research_gaps.append({
+                                "gap_type": pattern['type'],
+                                "description": pattern['gap'],
+                                "significance": pattern['significance'],
+                                "evidence": pattern['description'],
+                                "verification_reasoning": f"Pattern matched: {pattern['description']}"
+                            })
+                
+                logger.info(f"✅ Detection complete: {len(research_gaps)} gaps detected")
+                for idx, gap in enumerate(research_gaps):
+                    logger.info(f"   Gap {idx+1}: {gap.get('gap_type')} - {gap.get('description')[:60]}...")
+
+                result["research_gaps"] = research_gaps
+                result["success"] = True
+                return result
+
+            except json.JSONDecodeError as e:
+                logger.error(f"❌ Failed to parse detection response: {str(e)}")
+                logger.error(f"Response was: {detection_response[:500]}")
+                # Fallback to pattern matches
+                if pattern_matches:
+                    logger.warning("⚠️ Using pattern matches as fallback due to JSON parse error")
+                    return {
+                        "research_gaps": pattern_matches,
+                        "methodological_gaps": [m for m in pattern_matches if m['type'] == 'methodological'],
+                        "unaddressed_questions": [],
                         "future_directions": [],
                         "limitations": [],
-                        "unaddressed_questions": [],
-                        "methodological_gaps": [],
-                        "theoretical_gaps": [],
-                        "research_priorities": [],
-                        "collaboration_opportunities": [],
-                        "funding_considerations": []
+                        "success": True
                     }
-            else:
-                return {"error": "No response from Step 2 (verification)"}
+                return {
+                    "error": "Failed to parse detection response",
+                    "research_gaps": [],
+                    "methodological_gaps": [],
+                    "unaddressed_questions": [],
+                    "future_directions": [],
+                    "limitations": []
+                }
 
         except Exception as e:
-            logger.error(f"Research gap identification analysis failed: {str(e)}")
-            return {"error": str(e)}
+            logger.error(f"❌ Research gap identification failed: {str(e)}")
+            import traceback
+            logger.error(traceback.format_exc())
+            return {
+                "error": str(e),
+                "research_gaps": [],
+                "methodological_gaps": [],
+                "unaddressed_questions": [],
+                "future_directions": [],
+                "limitations": []
+            }

@@ -331,10 +331,11 @@ class EvidenceCollector:
     ) -> Optional[Dict[str, float]]:
         """
         Find actual text location in PDF using coordinate data.
-        Improved to handle multi-block evidence and combine bounding boxes.
+        CRITICAL: This must find EXACT evidence text, no more, no less.
+        Uses precise substring matching and tight bounding boxes.
         
         Args:
-            text_snippet: Text snippet to find
+            text_snippet: Text snippet to find (should be exact quote from PDF)
             page_number: Page number (1-indexed)
             
         Returns:
@@ -359,111 +360,160 @@ class EvidenceCollector:
             logger.warning(f"⚠️ No text blocks for page {page_number}")
             return self._estimate_bounding_box(text_snippet, page_number)
         
-        # Normalize text snippet for matching
+        # Normalize text snippet for matching (preserve word boundaries)
         snippet_normalized = re.sub(r'\s+', ' ', text_snippet.strip().lower())
         snippet_words = [w for w in snippet_normalized.split() if len(w) > 2]  # Filter out very short words
         
         if len(snippet_words) == 0:
             return self._estimate_bounding_box(text_snippet, page_number)
         
-        # Strategy 1: Try exact substring match first (most accurate)
-        matching_blocks = []
+        # CRITICAL: Strategy 1 - Exact substring match (highest priority)
+        # This is the most accurate - find blocks that contain the exact evidence text
+        # Prefer smaller blocks (spans) over larger blocks (lines) for tighter highlighting
+        exact_matches = []
+        for i, block in enumerate(text_blocks):
+            block_text = block.get("text", "")
+            block_normalized = re.sub(r'\s+', ' ', block_text.strip().lower())
+            
+            # Check if snippet is contained in block (exact substring match)
+            if snippet_normalized in block_normalized:
+                # Calculate what portion of the block text this represents
+                block_length = len(block_normalized)
+                snippet_length = len(snippet_normalized)
+                
+                if block_length > 0:
+                    snippet_ratio = snippet_length / block_length
+                    
+                    # Use the block's bounding box
+                    block_bbox = {
+                        "x": block.get("x", 0),
+                        "y": block.get("y", 0),
+                        "width": block.get("width", 0),
+                        "height": block.get("height", 0)
+                    }
+                    
+                    # Calculate block "size" (area) - prefer smaller blocks for tighter highlighting
+                    block_area = block_bbox.get("width", 0) * block_bbox.get("height", 0)
+                    
+                    # Score: exact match gets 1.0, but prefer blocks where snippet is larger portion
+                    # and blocks with smaller area (more precise)
+                    match_score = 1.0
+                    if snippet_ratio >= 0.8:
+                        match_score = 1.0  # Snippet is most of the block - perfect
+                    elif snippet_ratio >= 0.5:
+                        match_score = 0.98  # Snippet is significant portion
+                    else:
+                        match_score = 0.95  # Snippet is part of block
+                    
+                    # Prefer smaller blocks (spans) - they give tighter highlighting
+                    # Blocks with area < 0.01 are likely spans (more precise)
+                    if block_area < 0.01:
+                        match_score += 0.02  # Bonus for small blocks (spans)
+                    
+                    exact_matches.append((i, block, match_score, block_bbox, block_area))
+                    logger.debug(f"✅ Exact match (ratio: {snippet_ratio:.2f}, area: {block_area:.4f}) in block {i}: {block_text[:50]}...")
+        
+        # If we found exact matches, use the best one
+        # Prefer: 1) Higher match score, 2) Smaller block area (tighter highlighting)
+        if exact_matches:
+            # Sort by match score (descending), then by block area (ascending - prefer smaller blocks)
+            exact_matches.sort(key=lambda x: (-x[2], x[4]))
+            best_match = exact_matches[0]
+            best_block = best_match[1]
+            best_bbox = best_match[3]
+            
+            # Use the block's bounding box directly (should be tight, especially for spans)
+            result_bbox = {
+                "x": best_bbox.get("x", best_block.get("x", 0.1)),
+                "y": best_bbox.get("y", best_block.get("y", 0.4)),
+                "width": best_bbox.get("width", best_block.get("width", 0.8)),
+                "height": best_bbox.get("height", best_block.get("height", 0.1))
+            }
+            
+            logger.info(f"✅ Found exact text location: page {page_number}, bbox: {result_bbox}, match_score: {best_match[2]:.2f}, area: {best_match[4]:.4f}, snippet: {text_snippet[:50]}...")
+            return result_bbox
+        
+        # Strategy 2: High-precision fuzzy match (require 80%+ word overlap)
+        # Only use this if exact match fails, and require very high match quality
+        high_precision_matches = []
         for i, block in enumerate(text_blocks):
             block_text = block.get("text", "").lower()
             block_normalized = re.sub(r'\s+', ' ', block_text.strip())
+            block_words = [w for w in block_normalized.split() if len(w) > 2]
             
-            # Check if snippet is contained in block or vice versa
-            if snippet_normalized in block_normalized or block_normalized in snippet_normalized:
-                matching_blocks.append((i, block, 1.0))
-                logger.debug(f"✅ Exact match found in block {i}: {block_text[:50]}...")
+            if len(block_words) == 0:
+                continue
+            
+            # Count matching words (case-insensitive)
+            matching_words = sum(1 for word in snippet_words if word in block_words)
+            match_ratio = matching_words / max(len(snippet_words), len(block_words))
+            
+            # CRITICAL: Require at least 80% word overlap for fuzzy match (was 50%)
+            # This ensures we only match when the evidence text is truly present
+            if match_ratio >= 0.8:
+                # Also check that the matched words appear in order (more precise)
+                snippet_word_indices = [block_words.index(w) for w in snippet_words if w in block_words]
+                if len(snippet_word_indices) >= len(snippet_words) * 0.8:
+                    # Words appear in similar order - good match
+                    is_ordered = all(snippet_word_indices[i] <= snippet_word_indices[i+1] 
+                                    for i in range(len(snippet_word_indices)-1))
+                    if is_ordered or len(snippet_word_indices) == len(snippet_words):
+                        # Calculate block area - prefer smaller blocks (spans) for tighter highlighting
+                        block_bbox = {
+                            "x": block.get("x", 0),
+                            "y": block.get("y", 0),
+                            "width": block.get("width", 0),
+                            "height": block.get("height", 0)
+                        }
+                        block_area = block_bbox.get("width", 0) * block_bbox.get("height", 0)
+                        high_precision_matches.append((i, block, match_ratio, block_area))
+                        logger.debug(f"✅ High-precision fuzzy match (score: {match_ratio:.2f}, area: {block_area:.4f}) in block {i}: {block_text[:50]}...")
         
-        # Strategy 2: If no exact match, try fuzzy matching across multiple blocks
-        if not matching_blocks:
-            # Try to find blocks that contain significant word overlap
-            for i, block in enumerate(text_blocks):
-                block_text = block.get("text", "").lower()
-                block_words = [w for w in block_text.split() if len(w) > 2]
-                
-                if len(block_words) == 0:
-                    continue
-                
-                # Count matching words (case-insensitive)
-                matching_words = sum(1 for word in snippet_words if word in block_words)
-                match_ratio = matching_words / max(len(snippet_words), len(block_words))
-                
-                # Require at least 50% word overlap for a match
-                if match_ratio >= 0.5:
-                    matching_blocks.append((i, block, match_ratio))
-                    logger.debug(f"✅ Fuzzy match (score: {match_ratio:.2f}) in block {i}: {block_text[:50]}...")
+        # If we found high-precision matches, use the best one
+        # Prefer: 1) Higher match score, 2) Smaller block area (tighter highlighting)
+        if high_precision_matches:
+            # Sort by match score (descending), then by block area (ascending - prefer smaller blocks)
+            high_precision_matches.sort(key=lambda x: (-x[2], x[3]))
+            best_match = high_precision_matches[0]
+            best_block = best_match[1]
+            
+            # Use the block's bounding box (should be reasonably tight, especially for spans)
+            result_bbox = {
+                "x": best_block.get("x", 0.1),
+                "y": best_block.get("y", 0.4),
+                "width": best_block.get("width", 0.8),
+                "height": best_block.get("height", 0.1)
+            }
+            
+            logger.info(f"✅ Found high-precision text location: page {page_number}, bbox: {result_bbox}, match_score: {best_match[2]:.2f}, area: {best_match[3]:.4f}")
+            return result_bbox
         
-        # Strategy 3: If still no match, try finding blocks containing key phrases
-        if not matching_blocks and len(snippet_words) >= 3:
-            # Extract key phrases (2-3 word combinations)
-            key_phrases = []
-            for i in range(len(snippet_words) - 1):
-                key_phrases.append(' '.join(snippet_words[i:i+2]))
-            if len(snippet_words) >= 3:
-                key_phrases.append(' '.join(snippet_words[:3]))
-            
-            for i, block in enumerate(text_blocks):
-                block_text = block.get("text", "").lower()
-                # Check if any key phrase appears in this block
-                for phrase in key_phrases:
-                    if phrase in block_text:
-                        matching_blocks.append((i, block, 0.4))
-                        logger.debug(f"✅ Key phrase match in block {i}: {phrase}")
-                        break
+        # Strategy 3: Try to find evidence by searching for longest unique phrase
+        # Extract the longest meaningful phrase (3+ words) from the snippet
+        if len(snippet_words) >= 3:
+            # Try phrases of different lengths, starting with longest
+            for phrase_len in range(min(5, len(snippet_words)), 2, -1):
+                for start_idx in range(len(snippet_words) - phrase_len + 1):
+                    phrase_words = snippet_words[start_idx:start_idx + phrase_len]
+                    phrase = ' '.join(phrase_words)
+                    
+                    for i, block in enumerate(text_blocks):
+                        block_text = block.get("text", "").lower()
+                        block_normalized = re.sub(r'\s+', ' ', block_text.strip())
+                        
+                        if phrase in block_normalized:
+                            # Found the phrase - use this block
+                            result_bbox = {
+                                "x": block.get("x", 0.1),
+                                "y": block.get("y", 0.4),
+                                "width": block.get("width", 0.8),
+                                "height": block.get("height", 0.1)
+                            }
+                            logger.info(f"✅ Found phrase match: page {page_number}, phrase: {phrase[:30]}..., bbox: {result_bbox}")
+                            return result_bbox
         
-        # Combine matching blocks if evidence spans multiple blocks
-        if matching_blocks:
-            # Sort by match score (descending) and block index
-            matching_blocks.sort(key=lambda x: (-x[2], x[0]))
-            
-            # Get the best matching block(s)
-            # If we have multiple adjacent blocks, combine them
-            combined_blocks = []
-            last_index = -1
-            
-            for idx, block, score in matching_blocks:
-                # If this block is adjacent to the last one (within 3 blocks), combine
-                if last_index >= 0 and idx - last_index <= 3:
-                    combined_blocks.append(block)
-                elif len(combined_blocks) == 0:
-                    # Start a new group
-                    combined_blocks = [block]
-                else:
-                    # Break - non-adjacent block
-                    break
-                last_index = idx
-            
-            # If we have multiple blocks, combine their bounding boxes
-            if len(combined_blocks) > 1:
-                logger.debug(f"📦 Combining {len(combined_blocks)} blocks for evidence")
-                min_x = min(b.get("x", 0) for b in combined_blocks)
-                min_y = min(b.get("y", 0) for b in combined_blocks)
-                max_x = max(b.get("x", 0) + b.get("width", 0) for b in combined_blocks)
-                max_y = max(b.get("y", 0) + b.get("height", 0) for b in combined_blocks)
-                
-                return {
-                    "x": min_x,
-                    "y": min_y,
-                    "width": max_x - min_x,
-                    "height": max_y - min_y
-                }
-            else:
-                # Single block match
-                best_block = combined_blocks[0] if combined_blocks else matching_blocks[0][1]
-                bbox = {
-                    "x": best_block.get("x", 0.1),
-                    "y": best_block.get("y", 0.4),
-                    "width": best_block.get("width", 0.8),
-                    "height": best_block.get("height", 0.1)
-                }
-                logger.info(f"✅ Found text location: page {page_number}, bbox: {bbox}")
-                return bbox
-        
-        # Final fallback: estimate
-        logger.warning(f"⚠️ Could not find text location for snippet: {text_snippet[:50]}... on page {page_number}")
+        # Final fallback: estimate (but log warning)
+        logger.warning(f"⚠️ Could not find exact text location for snippet: {text_snippet[:50]}... on page {page_number}. Using estimate.")
         return self._estimate_bounding_box(text_snippet, page_number)
     
     def _estimate_bounding_box(

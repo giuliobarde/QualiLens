@@ -68,7 +68,8 @@ class ReproducibilityAssessorTool(BaseTool):
         )
     
     def execute(self, text_content: str, assessment_criteria: Optional[List[str]] = None,
-                reproducibility_level: str = "detailed", evidence_collector=None) -> Dict[str, Any]:
+                reproducibility_level: str = "detailed", evidence_collector=None, 
+                methodology_data: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
         """
         Assess study reproducibility.
         
@@ -85,9 +86,9 @@ class ReproducibilityAssessorTool(BaseTool):
             
             # Generate reproducibility assessment based on level
             if reproducibility_level == "basic":
-                assessment_result = self._assess_basic_reproducibility(text_content, assessment_criteria)
+                assessment_result = self._assess_basic_reproducibility(text_content, assessment_criteria, methodology_data)
             else:  # detailed
-                assessment_result = self._assess_detailed_reproducibility(text_content, assessment_criteria)
+                assessment_result = self._assess_detailed_reproducibility(text_content, assessment_criteria, methodology_data)
             
             # Collect evidence if evidence_collector is provided
             if evidence_collector:
@@ -223,30 +224,25 @@ class ReproducibilityAssessorTool(BaseTool):
 
                     logger.info(f"✅ Added NEGATIVE evidence {evidence_id}: {section_name} ({severity} severity, impact: {score_impact:.1f}, text_length: {len(text_to_add)} chars)")
             
-            # CRITICAL: Ensure reproducibility_score is NEVER 0.0
+            # Calculate base score with methodology adjustment
             raw_score = assessment_result.get("reproducibility_score", 0.0)
-
-            # If score is 0 or very low, apply minimum baseline
+            
+            # Calculate methodology-based baseline and adjustment
+            methodology_baseline, methodology_adjustment = self._calculate_methodology_based_score(methodology_data)
+            
+            # Start with methodology baseline (higher default, typically 0.40-0.60)
             if raw_score < 0.10:
-                logger.warning(f"⚠️  Score was {raw_score:.2f}, applying minimum baseline of 0.15")
-                final_score = 0.15
-
-                # If no good practices were found, add a baseline one
-                if not assessment_result.get("good_practices"):
-                    assessment_result["good_practices"] = [{
-                        "section_name": "Baseline - Paper Structure",
-                        "practice_category": "methodological_detail",
-                        "description": "Paper contains basic academic structure (methods, results)",
-                        "quality_rating": "minimal",
-                        "completeness": 0.2,
-                        "impact_on_reproducibility": "Provides minimal framework for understanding the research",
-                        "verification_reasoning": "Baseline credit for having academic paper structure",
-                        "confidence_percentage": 50
-                    }]
+                # Use methodology baseline if score is too low
+                adjusted_score = methodology_baseline
+                logger.info(f"📊 Raw score {raw_score:.2f} too low, using methodology baseline: {methodology_baseline:.2f}")
             else:
-                final_score = raw_score
+                # Apply methodology adjustment to raw score
+                adjusted_score = max(0.20, min(1.0, raw_score + methodology_adjustment))
+                logger.info(f"📊 Raw score: {raw_score:.2f}, methodology adjustment: {methodology_adjustment:+.2f}, final: {adjusted_score:.2f}")
+            
+            final_score = adjusted_score
 
-            logger.info(f"📊 Final reproducibility score: {final_score:.2f} (raw: {raw_score:.2f})")
+            logger.info(f"📊 Final reproducibility score: {final_score:.2f} (raw: {raw_score:.2f}, methodology baseline: {methodology_baseline:.2f}, adjustment: {methodology_adjustment:+.2f})")
 
             return {
                 "success": True,
@@ -300,7 +296,126 @@ class ReproducibilityAssessorTool(BaseTool):
         
         return None
     
-    def _assess_basic_reproducibility(self, text_content: str, assessment_criteria: Optional[List[str]]) -> Dict[str, Any]:
+    def _calculate_methodology_based_score(self, methodology_data: Optional[Dict[str, Any]]) -> tuple:
+        """
+        Calculate baseline reproducibility score and adjustment based on methodology type.
+        
+        Returns:
+            (baseline_score, adjustment): Baseline score (0.0-1.0) and adjustment (-0.2 to +0.2)
+        """
+        if not methodology_data:
+            # Default baseline for unknown methodology
+            return (0.45, 0.0)
+        
+        # Extract detected methodologies
+        detected_methodologies = methodology_data.get("detected_methodologies", {})
+        methodologies_list = detected_methodologies.get("methodologies", [])
+        
+        if not methodologies_list:
+            # No methodologies detected, use moderate baseline
+            return (0.45, 0.0)
+        
+        # First, try to use reproducibility_impact from methodology analysis if available
+        best_baseline = 0.45  # Default moderate baseline
+        best_adjustment = 0.0
+        
+        for methodology in methodologies_list:
+            reproducibility_impact = methodology.get("reproducibility_impact", {})
+            if reproducibility_impact:
+                score_contribution = reproducibility_impact.get("reproducibility_score_contribution")
+                if score_contribution:
+                    try:
+                        # Convert string to float if needed
+                        if isinstance(score_contribution, str):
+                            # Extract number from string like "0.65" or "0.6+"
+                            import re
+                            match = re.search(r'(\d+\.?\d*)', str(score_contribution))
+                            if match:
+                                score_contribution = float(match.group(1))
+                            else:
+                                score_contribution = None
+                        
+                        if score_contribution and isinstance(score_contribution, (int, float)):
+                            # Use the methodology's own reproducibility assessment
+                            baseline_from_methodology = float(score_contribution)
+                            if baseline_from_methodology > best_baseline:
+                                best_baseline = baseline_from_methodology
+                                logger.info(f"📊 Using methodology-provided reproducibility baseline: {best_baseline:.2f}")
+                    except (ValueError, TypeError) as e:
+                        logger.warning(f"Could not parse reproducibility_score_contribution: {score_contribution}")
+        
+        # If we got a good baseline from methodology, use it; otherwise fall back to lookup table
+        if best_baseline > 0.50:  # If we got a high baseline from methodology analysis
+            return (best_baseline, 0.0)
+        
+        # Fallback: Methodology-specific baselines and adjustments (if methodology didn't provide score)
+        methodology_scores = {
+            # High reproducibility potential
+            "randomized controlled trial": (0.65, +0.10),  # RCTs typically well-documented
+            "systematic review": (0.70, +0.15),  # Reviews often have detailed protocols
+            "meta-analysis": (0.70, +0.15),  # Meta-analyses require detailed methods
+            "laboratory experiment": (0.55, +0.05),  # Lab experiments often have detailed protocols
+            "field experiment": (0.50, 0.0),  # Field experiments moderate
+            "cohort study": (0.60, +0.08),  # Cohort studies often well-documented
+            "case-control study": (0.55, +0.05),  # Case-control studies moderate-high
+            "longitudinal study": (0.58, +0.08),  # Longitudinal studies need detailed tracking
+            
+            # Moderate reproducibility potential
+            "cross-sectional study": (0.50, 0.0),  # Cross-sectional moderate
+            "survey": (0.48, -0.02),  # Surveys can be vague
+            "quasi-experimental": (0.52, +0.02),  # Quasi-experimental moderate
+            "observational": (0.48, -0.02),  # Observational can be less detailed
+            
+            # Lower reproducibility potential (but still start higher)
+            "qualitative": (0.42, -0.05),  # Qualitative methods can be less standardized
+            "case study": (0.40, -0.08),  # Case studies often less reproducible
+            "ethnography": (0.38, -0.10),  # Ethnography highly context-dependent
+            "grounded theory": (0.40, -0.08),  # Grounded theory less standardized
+            "narrative analysis": (0.38, -0.10),  # Narrative analysis less reproducible
+        }
+        
+        # Find best matching methodology (only if we didn't get baseline from reproducibility_impact)
+        lookup_baseline = 0.45  # Default for lookup
+        lookup_adjustment = 0.0
+        
+        if best_baseline <= 0.50:  # Only use lookup if we don't have good methodology-based score
+            for methodology in methodologies_list:
+                methodology_type = methodology.get("type", "").lower()
+                quality_rating = methodology.get("quality_assessment", {}).get("quality_rating", "fair").lower()
+                
+                # Check for exact or partial matches
+                for key, (baseline, adjustment) in methodology_scores.items():
+                    if key in methodology_type:
+                        # Quality rating affects adjustment
+                        quality_multiplier = {
+                            "excellent": 1.2,
+                            "good": 1.0,
+                            "fair": 0.8,
+                            "poor": 0.5,
+                            "very_poor": 0.3
+                        }.get(quality_rating, 1.0)
+                        
+                        adjusted_adjustment = adjustment * quality_multiplier
+                        
+                        # Use the methodology with highest baseline
+                        if baseline > lookup_baseline:
+                            lookup_baseline = baseline
+                            lookup_adjustment = adjusted_adjustment
+            
+            # If no match found, use default with slight positive adjustment for having methodology
+            if lookup_baseline == 0.45:
+                lookup_adjustment = +0.05  # Small positive for having any methodology detected
+            
+            # Use lookup results
+            best_baseline = lookup_baseline
+            best_adjustment = lookup_adjustment
+        
+        logger.info(f"📊 Methodology-based scoring: baseline={best_baseline:.2f}, adjustment={best_adjustment:+.2f}")
+        
+        return (best_baseline, best_adjustment)
+    
+    def _assess_basic_reproducibility(self, text_content: str, assessment_criteria: Optional[List[str]], 
+                                      methodology_data: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
         """Assess basic reproducibility elements."""
         try:
             prompt = f"""
@@ -339,7 +454,7 @@ Focus on the most essential reproducibility elements.
             
             llm_response = self._get_openai_client().generate_completion(
                 prompt=prompt,
-                model="gpt-3.5-turbo",
+                model="gpt-4o-mini",
                 max_tokens=1000,
                 temperature=0.0  # Deterministic for consistency
             )
@@ -356,7 +471,8 @@ Focus on the most essential reproducibility elements.
             logger.error(f"Basic reproducibility assessment failed: {str(e)}")
             return {"error": str(e)}
     
-    def _assess_detailed_reproducibility(self, text_content: str, assessment_criteria: Optional[List[str]]) -> Dict[str, Any]:
+    def _assess_detailed_reproducibility(self, text_content: str, assessment_criteria: Optional[List[str]], 
+                                        methodology_data: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
         """
         Assess detailed reproducibility using a comprehensive two-phase approach.
 
@@ -374,12 +490,27 @@ Focus on the most essential reproducibility elements.
         try:
             # PHASE 1: Identify sections with reproducibility practices
             logger.info("🔍 PHASE 1: Identifying sections with reproducibility practices across the paper...")
+            
+            # Extract methodology information for context
+            methodology_context = ""
+            if methodology_data:
+                detected_methodologies = methodology_data.get("detected_methodologies", {})
+                methodologies_list = detected_methodologies.get("methodologies", [])
+                if methodologies_list:
+                    methodology_types = [m.get("type", "Unknown") for m in methodologies_list[:3]]
+                    methodology_context = f"\n\nDETECTED METHODOLOGIES: {', '.join(methodology_types)}\n"
+                    methodology_context += "Consider how these methodology types typically affect reproducibility. For example:\n"
+                    methodology_context += "- RCTs and systematic reviews typically have higher reproducibility standards\n"
+                    methodology_context += "- Qualitative studies may have different reproducibility expectations\n"
+                    methodology_context += "- Laboratory experiments often have detailed protocols\n"
 
             section_analysis_prompt = f"""
 You are an expert in research reproducibility. Your task is to analyze this research paper and identify SECTIONS that contain reproducibility practices (either good or bad).
 
 PAPER CONTENT:
 {text_content[:8000]}
+
+{methodology_context}
 
 {f"SPECIFIC CRITERIA TO ASSESS: {', '.join(assessment_criteria)}" if assessment_criteria else ""}
 
@@ -508,7 +639,7 @@ Be thorough and creative - even papers without explicit data sharing statements 
             # Phase 1: Section identification
             section_response = self._get_openai_client().generate_completion(
                 prompt=section_analysis_prompt,
-                model="gpt-3.5-turbo",
+                model="gpt-4o-mini",
                 max_tokens=3500,
                 temperature=0.2  # Low temperature for systematic analysis
             )
@@ -605,7 +736,7 @@ Think creatively - make educated guesses!
 
                 inference_response = self._get_openai_client().generate_completion(
                     prompt=inference_prompt,
-                    model="gpt-3.5-turbo",
+                    model="gpt-4o-mini",
                     max_tokens=2000,
                     temperature=0.3  # Slightly higher for creative inference
                 )
@@ -645,12 +776,17 @@ Think creatively - make educated guesses!
                                 "confidence_percentage": 70
                             })
 
-                        logger.info(f"✅ CREATIVE INFERENCE complete: Score {inferred_result.get('reproducibility_score', 0.15):.2f}")
+                        # Adjust inferred score with methodology baseline
+                        methodology_baseline, methodology_adjustment = self._calculate_methodology_based_score(methodology_data)
+                        inferred_score = inferred_result.get("reproducibility_score", methodology_baseline)
+                        adjusted_inferred_score = max(methodology_baseline * 0.8, min(1.0, inferred_score + methodology_adjustment))
+                        
+                        logger.info(f"✅ CREATIVE INFERENCE complete: Inferred {inferred_score:.2f}, adjusted to {adjusted_inferred_score:.2f} (methodology baseline: {methodology_baseline:.2f})")
                         logger.info(f"   - {len(good_practices)} practices inferred")
                         logger.info(f"   - {len(bad_practices)} barriers identified")
 
                         return {
-                            "reproducibility_score": max(0.15, inferred_result.get("reproducibility_score", 0.15)),
+                            "reproducibility_score": adjusted_inferred_score,
                             "good_practices": good_practices,
                             "bad_practices": bad_practices,
                             "methodological_detail": inferred_result.get("methodological_detail", "Limited information available"),
@@ -663,10 +799,11 @@ Think creatively - make educated guesses!
                     except json.JSONDecodeError as e:
                         logger.error(f"Failed to parse inference response: {str(e)}")
 
-                # Ultimate fallback with reasonable baseline
-                logger.warning("⚠️  Inference failed - using conservative baseline assessment")
+                # Ultimate fallback with methodology-based baseline
+                methodology_baseline, _ = self._calculate_methodology_based_score(methodology_data)
+                logger.warning(f"⚠️  Inference failed - using methodology-based baseline: {methodology_baseline:.2f}")
                 return {
-                    "reproducibility_score": 0.20,  # Reasonable baseline, not 0!
+                    "reproducibility_score": methodology_baseline,  # Use methodology-based baseline
                     "good_practices": [{
                         "section_name": "Baseline - Methods Section Exists",
                         "practice_category": "methodological_detail",
@@ -883,7 +1020,7 @@ CRITICAL REMINDERS:
             # Phase 2: Rigorous verification
             verification_response = self._get_openai_client().generate_completion(
                 prompt=verification_prompt,
-                model="gpt-3.5-turbo",
+                model="gpt-4o-mini",
                 max_tokens=4500,
                 temperature=0.0  # Deterministic for consistency
             )

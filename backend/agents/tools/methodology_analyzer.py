@@ -525,7 +525,7 @@ For EACH methodology detected, provide:
       "type": "Methodology name (e.g., 'Randomized Controlled Trial')",
       "category": "Category (experimental/observational/qualitative/mixed/survey/review/specialized)",
       "confidence": 0.0-1.0,
-      "evidence_text": "Specific text snippet from paper indicating this methodology (direct quote)",
+      "evidence_text": "EXACT text snippet from paper indicating this methodology (MUST be a direct quote, word-for-word from the paper, not a paraphrase or summary)",
       "page_indicators": ["Page 3: Methods section", "Page 5: Study design figure"],
       "quality_assessment": {{
         "is_appropriate": true/false,
@@ -535,6 +535,21 @@ For EACH methodology detected, provide:
         "compliance_with_standards": "How well it follows field-specific reporting standards (CONSORT, STROBE, PRISMA, COREQ, etc.)",
         "missing_elements": ["Element 1 that should be present", "Element 2 that should be reported"],
         "quality_rating": "excellent/good/fair/poor/very_poor"
+      }},
+      "reproducibility_impact": {{
+        "baseline_reproducibility": "high/medium/low",
+        "reproducibility_rationale": "How this methodology type typically affects reproducibility. For example: RCTs typically have high reproducibility due to standardized protocols; qualitative studies may have lower reproducibility due to context-dependency.",
+        "positive_factors": ["Factor 1 that enhances reproducibility", "Factor 2 that enhances reproducibility"],
+        "negative_factors": ["Factor 1 that may hinder reproducibility", "Factor 2 that may hinder reproducibility"],
+        "reproducibility_score_contribution": "Estimate how this methodology contributes to overall reproducibility (0.0-1.0 scale, where 0.6+ is high, 0.4-0.6 is medium, <0.4 is low)"
+      }},
+      "methodology_characteristics": {{
+        "standardization_level": "high/medium/low",
+        "documentation_requirements": "high/medium/low",
+        "context_dependency": "high/medium/low",
+        "typical_sample_size": "large/medium/small/variable",
+        "data_complexity": "high/medium/low",
+        "analysis_complexity": "high/medium/low"
       }},
       "implementation_quality": {{
         "sample_size_adequate": true/false,
@@ -561,12 +576,58 @@ Be thorough and look for:
 - Analysis approaches
 - References to methodological frameworks
 
+CRITICAL: For "evidence_text", you MUST provide the EXACT word-for-word text from the paper. Do NOT paraphrase, summarize, or reword. Copy the text exactly as it appears in the paper. This is essential for accurate PDF highlighting.
+
+CRITICAL: For each methodology, analyze how it affects reproducibility and quality:
+
+**REPRODUCIBILITY IMPACT ANALYSIS:**
+- **High Reproducibility Methodologies** (typically 0.6-0.8 baseline):
+  - RCTs: Standardized protocols, detailed CONSORT reporting → high reproducibility
+  - Systematic Reviews/Meta-Analyses: PRISMA guidelines, detailed search strategies → high reproducibility
+  - Laboratory Experiments: Controlled conditions, detailed protocols → high reproducibility
+  - Cohort Studies: Well-documented longitudinal tracking → medium-high reproducibility
+  
+- **Medium Reproducibility Methodologies** (typically 0.4-0.6 baseline):
+  - Cross-Sectional Studies: Standardized surveys → medium reproducibility
+  - Case-Control Studies: Well-documented matching → medium reproducibility
+  - Quasi-Experimental: Some standardization → medium reproducibility
+  
+- **Lower Reproducibility Methodologies** (typically 0.3-0.5 baseline):
+  - Qualitative Studies: Context-dependent, interpretive → lower reproducibility
+  - Case Studies: Highly context-specific → lower reproducibility
+  - Ethnography: Deeply contextual → lower reproducibility
+
+**POSITIVE FACTORS** that enhance reproducibility:
+- Standardized protocols and procedures
+- Detailed documentation requirements
+- Quantitative data collection
+- Controlled experimental conditions
+- Clear inclusion/exclusion criteria
+- Pre-registration or protocol publication
+
+**NEGATIVE FACTORS** that may hinder reproducibility:
+- High context dependency
+- Interpretive or subjective analysis
+- Unclear or flexible procedures
+- Qualitative data without clear coding schemes
+- Small sample sizes with limited generalizability
+
+**METHODOLOGY CHARACTERISTICS** to assess:
+- Standardization Level: How standardized are the procedures? (RCTs = high, ethnography = low)
+- Documentation Requirements: How much detail is typically required? (systematic reviews = high, narrative reviews = low)
+- Context Dependency: How much does context matter? (lab experiments = low, case studies = high)
+- Typical Sample Size: Large samples = more reproducible, small samples = less generalizable
+- Data Complexity: Simple quantitative = more reproducible, complex qualitative = less reproducible
+- Analysis Complexity: Standard statistical tests = more reproducible, interpretive analysis = less reproducible
+
+For each methodology, provide a thoughtful analysis of how it typically affects reproducibility based on the methodology type itself, not just the specific implementation in this paper.
+
 Return ONLY valid JSON. If no clear methodology is found, return an empty methodologies array.
 """
 
             llm_response = self._get_openai_client().generate_completion(
                 prompt=prompt,
-                model="gpt-4-turbo-preview",  # Use GPT-4 Turbo for better methodology detection
+                model="gpt-4o-mini",
                 max_tokens=4000,
                 temperature=0.0
             )
@@ -622,7 +683,7 @@ Focus on identifying the most relevant field for applying appropriate methodolog
             
             llm_response = self._get_openai_client().generate_completion(
                 prompt=prompt,
-                model="gpt-3.5-turbo",
+                model="gpt-4o-mini",
                 max_tokens=800,
                 temperature=0.0  # Deterministic for consistency
             )
@@ -768,7 +829,7 @@ Provide the most comprehensive analysis possible using {checklist} standards.
             
             llm_response = self._get_openai_client().generate_completion(
                 prompt=prompt,
-                model="gpt-3.5-turbo",
+                model="gpt-4o-mini",
                 max_tokens=3000,
                 temperature=0.0  # Deterministic for consistency
             )
@@ -1279,7 +1340,7 @@ Consider field-specific standards and provide varied, realistic scores based on 
             
             llm_response = self._get_openai_client().generate_completion(
                 prompt=prompt,
-                model="gpt-3.5-turbo",
+                model="gpt-4o-mini",
                 max_tokens=500,
                 temperature=0.0  # Deterministic for consistency
             )

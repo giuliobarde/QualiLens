@@ -149,7 +149,7 @@ Focus on clarity, impact, and the most important aspects for decision-makers.
             
             llm_response = self._get_openai_client().generate_completion(
                 prompt=prompt,
-                model="gpt-3.5-turbo",
+                model="gpt-4o-mini",
                 max_tokens=800
             )
             
@@ -211,7 +211,7 @@ Focus on the most important and novel findings.
             
             llm_response = self._get_openai_client().generate_completion(
                 prompt=prompt,
-                model="gpt-3.5-turbo",
+                model="gpt-4o-mini",
                 max_tokens=1000
             )
             
@@ -268,7 +268,7 @@ Provide clear, structured information for each section.
             
             llm_response = self._get_openai_client().generate_completion(
                 prompt=prompt,
-                model="gpt-3.5-turbo",
+                model="gpt-4o-mini",
                 max_tokens=1200
             )
             
@@ -333,7 +333,7 @@ Provide a thorough but concise overview of the entire research.
             
             llm_response = self._get_openai_client().generate_completion(
                 prompt=prompt,
-                model="gpt-3.5-turbo",
+                model="gpt-4o-mini",
                 max_tokens=1500
             )
             
