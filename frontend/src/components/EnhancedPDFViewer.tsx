@@ -46,6 +46,8 @@ const getCategoryColor = (category: string): { fill: string; stroke: string } =>
       return { fill: 'rgba(34, 197, 94, 0.3)', stroke: '#22c55e' }; // green
     case 'statistics':
       return { fill: 'rgba(168, 85, 247, 0.3)', stroke: '#a855f7' }; // purple
+    case 'research_gap':
+      return { fill: 'rgba(234, 179, 8, 0.4)', stroke: '#eab308' }; // yellow
     default:
       return { fill: 'rgba(156, 163, 175, 0.3)', stroke: '#9ca3af' }; // gray
   }
@@ -624,6 +626,10 @@ export default function EnhancedPDFViewer({
           <div className="flex items-center space-x-1">
             <div className="w-4 h-4 rounded border-2" style={{ backgroundColor: getCategoryColor('statistics').fill, borderColor: getCategoryColor('statistics').stroke }}></div>
             <span>Statistics</span>
+          </div>
+          <div className="flex items-center space-x-1">
+            <div className="w-4 h-4 rounded border-2" style={{ backgroundColor: getCategoryColor('research_gap').fill, borderColor: getCategoryColor('research_gap').stroke }}></div>
+            <span>Research Gaps</span>
           </div>
           <span className="ml-4 text-gray-600">
             {filteredEvidence.length} evidence item{filteredEvidence.length !== 1 ? 's' : ''}

@@ -27,7 +27,7 @@ interface EvidenceVisualizationProps {
   onCategoryChange?: (category: string) => void;
 }
 
-type EvidenceCategory = 'all' | 'bias' | 'methodology' | 'reproducibility' | 'statistics';
+type EvidenceCategory = 'all' | 'bias' | 'methodology' | 'reproducibility' | 'statistics' | 'research_gap';
 
 export default function EvidenceVisualization({
   evidenceTraces = [],
@@ -118,6 +118,8 @@ export default function EvidenceVisualization({
         return 'bg-green-100 text-green-800 border-green-300';
       case 'statistics':
         return 'bg-purple-100 text-purple-800 border-purple-300';
+      case 'research_gap':
+        return 'bg-yellow-100 text-yellow-800 border-yellow-300';
       default:
         return 'bg-gray-100 text-gray-800 border-gray-300';
     }
@@ -179,7 +181,7 @@ export default function EvidenceVisualization({
       <div className="px-6 py-4 border-b border-gray-200 bg-gray-50">
         <div className="flex items-center space-x-2 flex-wrap gap-2">
           <span className="text-sm font-medium text-gray-700">Filter:</span>
-          {(['all', 'bias', 'methodology', 'reproducibility', 'statistics'] as EvidenceCategory[]).map((category) => (
+          {(['all', 'bias', 'methodology', 'reproducibility', 'statistics', 'research_gap'] as EvidenceCategory[]).map((category) => (
             <button
               key={category}
               onClick={() => handleCategoryChange(category)}
@@ -189,7 +191,7 @@ export default function EvidenceVisualization({
                   : 'bg-white text-gray-700 hover:bg-gray-100 border border-gray-300'
               }`}
             >
-              {category.charAt(0).toUpperCase() + category.slice(1)}
+              {category === 'research_gap' ? 'Research Gaps' : category.charAt(0).toUpperCase() + category.slice(1)}
               {category !== 'all' && (
                 <span className="ml-1.5 px-1.5 py-0.5 bg-white/20 rounded text-xs">
                   {evidenceTraces.filter(e => e.category === category).length}
