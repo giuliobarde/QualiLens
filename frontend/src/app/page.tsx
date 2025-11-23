@@ -15,11 +15,6 @@ const PDFViewerWithHighlights = dynamic(
   { ssr: false }
 );
 
-const SimplePDFViewer = dynamic(
-  () => import('@/components/SimplePDFViewer'),
-  { ssr: false }
-);
-
 const EnhancedPDFViewer = dynamic(
   () => import('@/components/EnhancedPDFViewer'),
   { ssr: false }
@@ -37,8 +32,9 @@ export default function Home() {
   const [isDragging, setIsDragging] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [selectedEvidenceId, setSelectedEvidenceId] = useState<string | null>(null);
-  const [useSimplePDFViewer, setUseSimplePDFViewer] = useState(false); // Use enhanced viewer with evidence by default
-  const [evidenceCategoryFilter, setEvidenceCategoryFilter] = useState<string>('all');
+  const [evidenceVisualizationFilter, setEvidenceVisualizationFilter] = useState<string>('all'); // Separate filter for Evidence Visualization only
+  const [showHighlightDetails, setShowHighlightDetails] = useState(false);
+  const [selectedHighlightEvidence, setSelectedHighlightEvidence] = useState<any>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const dropZoneRef = useRef<HTMLDivElement>(null);
 
@@ -242,11 +238,11 @@ export default function Home() {
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-50 via-blue-50 to-indigo-50">
       {/* Enhanced Header */}
-      <div className="bg-white/80 backdrop-blur-md shadow-lg border-b border-gray-200/50 sticky top-0 z-50">
+      <div className="bg-white/90 backdrop-blur-md shadow-md border-b border-gray-200/50 sticky top-0 z-50">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-4">
           <div className="flex items-center justify-between">
             <div className="flex items-center space-x-3">
-              <div className="w-10 h-10 bg-gradient-to-br from-blue-600 to-indigo-600 rounded-xl flex items-center justify-center shadow-lg">
+              <div className="w-10 h-10 bg-gradient-to-br from-blue-600 to-indigo-600 rounded-xl flex items-center justify-center shadow-md">
                 <svg className="w-6 h-6 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
                 </svg>
@@ -261,7 +257,7 @@ export default function Home() {
             {analysisResult && (
               <button
                 onClick={exportResults}
-                className="hidden sm:flex items-center space-x-2 px-4 py-2 bg-gradient-to-r from-blue-600 to-indigo-600 text-white rounded-lg hover:from-blue-700 hover:to-indigo-700 transition-all shadow-md hover:shadow-lg"
+                className="hidden sm:flex items-center space-x-2 px-4 py-2 bg-gradient-to-r from-blue-600 to-indigo-600 text-white rounded-lg hover:from-blue-700 hover:to-indigo-700 transition-all shadow-sm hover:shadow-md"
               >
                 <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
@@ -502,7 +498,7 @@ export default function Home() {
           /* Enhanced Results Display */
           <div className="space-y-6">
             {/* Action Bar */}
-            <div className="bg-white/90 backdrop-blur-sm rounded-2xl shadow-lg p-4 border border-gray-200/50">
+            <div className="bg-white/95 backdrop-blur-sm rounded-2xl shadow-md p-5 border border-gray-200/50">
               <div className="flex items-center justify-between flex-wrap gap-4">
                 <div className="flex items-center space-x-3">
                   <div className="w-10 h-10 bg-green-100 rounded-xl flex items-center justify-center">
@@ -518,7 +514,7 @@ export default function Home() {
                 <div className="flex items-center space-x-3">
                   <button
                     onClick={exportResults}
-                    className="flex items-center space-x-2 px-4 py-2 bg-gray-100 hover:bg-gray-200 text-gray-700 rounded-lg transition-all"
+                    className="flex items-center space-x-2 px-4 py-2 bg-gray-100 hover:bg-gray-200 text-gray-700 rounded-lg transition-all shadow-sm hover:shadow"
                   >
                     <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
@@ -530,7 +526,7 @@ export default function Home() {
                       removeFile();
                       setQuery('');
                     }}
-                    className="flex items-center space-x-2 px-4 py-2 bg-red-50 hover:bg-red-100 text-red-700 rounded-lg transition-all"
+                    className="flex items-center space-x-2 px-4 py-2 bg-red-50 hover:bg-red-100 text-red-700 rounded-lg transition-all shadow-sm hover:shadow"
                   >
                     <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
@@ -541,10 +537,12 @@ export default function Home() {
               </div>
             </div>
 
+            <div className="space-y-6">
+              {/* Top Row: PDF Viewer and Quality Score */}
             <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
               {/* Paper Display - 2/3 of screen */}
               <div className="lg:col-span-2">
-                <div className="bg-white/90 backdrop-blur-sm rounded-2xl shadow-xl overflow-hidden border border-gray-200/50 h-[calc(100vh-280px)]">
+                  <div className="bg-white/95 backdrop-blur-sm rounded-2xl shadow-lg overflow-hidden border border-gray-200/50 h-[calc(100vh-280px)]">
                   <div className="bg-gradient-to-r from-gray-50 to-gray-100 px-6 py-4 border-b border-gray-200">
                     <div className="flex items-center justify-between">
                       <div className="flex items-center space-x-3">
@@ -555,61 +553,42 @@ export default function Home() {
                         </div>
                         <h3 className="text-lg font-semibold text-gray-800">Document Viewer</h3>
                       </div>
-                      <div className="flex items-center space-x-3">
                         {attachedFile && (
-                          <>
-                            <button
-                              onClick={() => setUseSimplePDFViewer(!useSimplePDFViewer)}
-                              className="text-xs px-3 py-1.5 bg-blue-100 hover:bg-blue-200 text-blue-700 rounded-lg transition-all"
-                              title="Toggle PDF viewer"
-                            >
-                              {useSimplePDFViewer ? 'Advanced View' : 'Simple View'}
-                            </button>
-                            <span className="text-xs text-gray-500">
+                          <span className="text-xs text-gray-500 font-medium">
                               {(attachedFile.size / 1024 / 1024).toFixed(2)} MB
                             </span>
-                          </>
                         )}
-                      </div>
                     </div>
                   </div>
                   <div className="h-[calc(100%-73px)]">
                     {pdfContent && (
-                      <div className="w-full h-full">
-                        {useSimplePDFViewer ? (
-                          <SimplePDFViewer
-                            pdfUrl={pdfContent}
-                            fileName={attachedFile?.name}
-                          />
-                        ) : (
                           <EnhancedPDFViewer
                             pdfUrl={pdfContent}
                             fileName={attachedFile?.name}
-                            evidenceTraces={analysisResult?.evidence_traces || []}
-                            selectedEvidenceId={selectedEvidenceId}
-                            categoryFilter={evidenceCategoryFilter}
-                            onEvidenceClick={(evidence) => {
-                              setSelectedEvidenceId(evidence.id);
-                            }}
+                        evidenceTraces={analysisResult?.evidence_traces || []}
+                        selectedEvidenceId={selectedEvidenceId}
+                        onEvidenceClick={(evidence) => {
+                          setSelectedEvidenceId(evidence.id);
+                          setSelectedHighlightEvidence(evidence);
+                          setShowHighlightDetails(true);
+                        }}
                           />
                         )}
                       </div>
-                    )}
+                  </div>
+                </div>
+
+                {/* Quality Score - 1/3 of screen */}
+                <div className="lg:col-span-1">
+                  <div className="bg-white/95 backdrop-blur-sm rounded-2xl shadow-lg p-6 border border-gray-200/50 h-[calc(100vh-280px)]">
+                    <CircularScoreDisplay data={analysisResult} />
                   </div>
                 </div>
               </div>
 
-              {/* Scoring and Analysis - 1/3 of screen */}
-              <div className="lg:col-span-1 flex flex-col space-y-6">
-                {/* Enhanced Quality Score Display */}
-                <div className="bg-white/90 backdrop-blur-sm rounded-2xl shadow-xl p-6 border border-gray-200/50">
-                  <CircularScoreDisplay data={analysisResult} />
-                </div>
-
-                {/* Scrollable Analysis Sections */}
-                <div className="flex-1 bg-white/90 backdrop-blur-sm rounded-2xl shadow-xl overflow-hidden border border-gray-200/50">
+              {/* Bottom Row: Analysis Sections - Full Width */}
+              <div className="bg-white/95 backdrop-blur-sm rounded-2xl shadow-lg overflow-hidden border border-gray-200/50">
                   <ScrollableAnalysisSections data={analysisResult} />
-                </div>
               </div>
             </div>
 
@@ -619,8 +598,8 @@ export default function Home() {
                 <EvidenceVisualization
                   evidenceTraces={analysisResult.evidence_traces}
                   pdfContent={pdfContent}
-                  selectedCategory={evidenceCategoryFilter}
-                  onCategoryChange={setEvidenceCategoryFilter}
+                  selectedCategory={evidenceVisualizationFilter}
+                  onCategoryChange={setEvidenceVisualizationFilter}
                   onEvidenceClick={(evidence) => {
                     setSelectedEvidenceId(evidence.id);
                     // Scroll to the page in PDF viewer
@@ -642,6 +621,131 @@ export default function Home() {
                 </div>
               </div>
             )}
+          </div>
+        )}
+
+        {/* Highlight Details Modal */}
+        {showHighlightDetails && selectedHighlightEvidence && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm" onClick={() => setShowHighlightDetails(false)}>
+            <div className="bg-white rounded-2xl shadow-2xl max-w-2xl w-full mx-4 max-h-[90vh] overflow-hidden" onClick={(e) => e.stopPropagation()}>
+              <div className="bg-gradient-to-r from-blue-600 to-indigo-600 px-6 py-4 flex items-center justify-between">
+                <div className="flex items-center space-x-3">
+                  <div className="w-10 h-10 bg-white/20 rounded-lg flex items-center justify-center">
+                    <svg className="w-6 h-6 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" />
+                    </svg>
+                  </div>
+                  <div>
+                    <h3 className="text-xl font-bold text-white">Evidence Details</h3>
+                    <p className="text-sm text-blue-100 capitalize">{selectedHighlightEvidence.category}</p>
+                  </div>
+                </div>
+                <button
+                  onClick={() => setShowHighlightDetails(false)}
+                  className="p-2 hover:bg-white/20 rounded-lg transition-all"
+                >
+                  <svg className="w-6 h-6 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                  </svg>
+                </button>
+              </div>
+              
+              <div className="p-6 overflow-y-auto max-h-[calc(90vh-80px)]">
+                <div className="space-y-6">
+                  {/* Category and Metadata */}
+                  <div className="flex items-center space-x-3 flex-wrap gap-2">
+                    <span className={`px-3 py-1.5 rounded-lg text-sm font-semibold ${
+                      selectedHighlightEvidence.category === 'bias' ? 'bg-red-100 text-red-800' :
+                      selectedHighlightEvidence.category === 'methodology' ? 'bg-blue-100 text-blue-800' :
+                      selectedHighlightEvidence.category === 'reproducibility' ? 'bg-green-100 text-green-800' :
+                      selectedHighlightEvidence.category === 'statistics' ? 'bg-purple-100 text-purple-800' :
+                      'bg-yellow-100 text-yellow-800'
+                    }`}>
+                      {selectedHighlightEvidence.category.charAt(0).toUpperCase() + selectedHighlightEvidence.category.slice(1)}
+                    </span>
+                    {selectedHighlightEvidence.severity && (
+                      <span className={`px-3 py-1.5 rounded-lg text-sm font-medium ${
+                        selectedHighlightEvidence.severity === 'high' ? 'bg-red-100 text-red-800' :
+                        selectedHighlightEvidence.severity === 'medium' ? 'bg-yellow-100 text-yellow-800' :
+                        'bg-green-100 text-green-800'
+                      }`}>
+                        Severity: {selectedHighlightEvidence.severity}
+                      </span>
+                    )}
+                    {selectedHighlightEvidence.confidence && (
+                      <span className="px-3 py-1.5 rounded-lg text-sm font-medium bg-gray-100 text-gray-800">
+                        Confidence: {(selectedHighlightEvidence.confidence * 100).toFixed(0)}%
+                      </span>
+                    )}
+                    {selectedHighlightEvidence.page_number && (
+                      <span className="px-3 py-1.5 rounded-lg text-sm font-medium bg-indigo-100 text-indigo-800">
+                        Page {selectedHighlightEvidence.page_number}
+                      </span>
+                    )}
+                  </div>
+
+                  {/* Evidence Text */}
+                  <div>
+                    <h4 className="text-sm font-semibold text-gray-700 mb-2 uppercase tracking-wide">Evidence Text</h4>
+                    <div className="bg-gray-50 rounded-xl p-4 border border-gray-200">
+                      <p className="text-base text-gray-800 leading-relaxed whitespace-pre-wrap">
+                        {selectedHighlightEvidence.text_snippet}
+                      </p>
+                    </div>
+                  </div>
+
+                  {/* Rationale */}
+                  <div>
+                    <h4 className="text-sm font-semibold text-gray-700 mb-2 uppercase tracking-wide">Analysis Rationale</h4>
+                    <div className="bg-blue-50 rounded-xl p-4 border border-blue-200">
+                      <p className="text-base text-gray-800 leading-relaxed whitespace-pre-wrap">
+                        {selectedHighlightEvidence.rationale}
+                      </p>
+                    </div>
+                  </div>
+
+                  {/* Score Impact */}
+                  {selectedHighlightEvidence.score_impact !== undefined && (
+                    <div className="bg-gradient-to-r from-gray-50 to-gray-100 rounded-xl p-4 border border-gray-200">
+                      <div className="flex items-center justify-between">
+                        <span className="text-sm font-semibold text-gray-700">Score Impact</span>
+                        <span className={`text-2xl font-bold ${
+                          selectedHighlightEvidence.score_impact > 0 ? 'text-green-600' : 'text-red-600'
+                        }`}>
+                          {selectedHighlightEvidence.score_impact > 0 ? '+' : ''}{selectedHighlightEvidence.score_impact.toFixed(1)} points
+                        </span>
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Location Info */}
+                  {selectedHighlightEvidence.bounding_box && (
+                    <div className="bg-yellow-50 rounded-xl p-4 border border-yellow-200">
+                      <h4 className="text-sm font-semibold text-gray-700 mb-3 uppercase tracking-wide">Location in Document</h4>
+                      <div className="grid grid-cols-2 gap-3 text-sm">
+                        <div>
+                          <span className="text-gray-600">X Position:</span>
+                          <span className="ml-2 font-medium text-gray-800">{(selectedHighlightEvidence.bounding_box.x * 100).toFixed(1)}%</span>
+                        </div>
+                        <div>
+                          <span className="text-gray-600">Y Position:</span>
+                          <span className="ml-2 font-medium text-gray-800">{(selectedHighlightEvidence.bounding_box.y * 100).toFixed(1)}%</span>
+                        </div>
+                        <div>
+                          <span className="text-gray-600">Width:</span>
+                          <span className="ml-2 font-medium text-gray-800">{(selectedHighlightEvidence.bounding_box.width * 100).toFixed(1)}%</span>
+                        </div>
+                        <div>
+                          <span className="text-gray-600">Height:</span>
+                          <span className="ml-2 font-medium text-gray-800">{(selectedHighlightEvidence.bounding_box.height * 100).toFixed(1)}%</span>
+                        </div>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              </div>
+            </div>
           </div>
         )}
       </div>

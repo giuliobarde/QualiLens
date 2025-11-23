@@ -33,7 +33,6 @@ interface EnhancedPDFViewerProps {
   evidenceTraces?: EvidenceItem[];
   selectedEvidenceId?: string | null;
   onEvidenceClick?: (evidence: EvidenceItem) => void;
-  categoryFilter?: string; // 'all' or specific category
 }
 
 const getCategoryColor = (category: string): { fill: string; stroke: string } => {
@@ -58,8 +57,7 @@ export default function EnhancedPDFViewer({
   fileName,
   evidenceTraces = [],
   selectedEvidenceId,
-  onEvidenceClick,
-  categoryFilter = 'all'
+  onEvidenceClick
 }: EnhancedPDFViewerProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const canvasRefs = useRef<Map<number, HTMLCanvasElement>>(new Map());
@@ -74,14 +72,15 @@ export default function EnhancedPDFViewer({
   const [hoveredEvidenceId, setHoveredEvidenceId] = useState<string | null>(null);
   const [hoveredEvidence, setHoveredEvidence] = useState<EvidenceItem | null>(null);
   const [hoverPosition, setHoverPosition] = useState<{ x: number; y: number } | null>(null);
+  const [showHighlights, setShowHighlights] = useState<boolean>(true); // Default: highlights visible
+  const [enabledCategories, setEnabledCategories] = useState<Set<string>>(new Set(['bias', 'methodology', 'reproducibility', 'statistics', 'research_gap'])); // All categories enabled by default
   const pageRenderingRef = useRef<Set<number>>(new Set());
 
-  // Filter evidence by category - use useMemo to prevent recreation on every render
+  // Filter evidence by enabled categories - use useMemo to prevent recreation on every render
   const filteredEvidence = useMemo(() => {
-    return categoryFilter === 'all'
-      ? evidenceTraces
-      : evidenceTraces.filter(e => e.category === categoryFilter);
-  }, [evidenceTraces, categoryFilter]);
+    // Filter by enabled categories only (no external category filter)
+    return evidenceTraces.filter(e => enabledCategories.has(e.category));
+  }, [evidenceTraces, enabledCategories]);
 
   // Group evidence by page - use useMemo to prevent recreation on every render
   const evidenceByPage = useMemo(() => {
@@ -181,6 +180,11 @@ export default function EnhancedPDFViewer({
 
     // Clear previous highlights
     ctx.clearRect(0, 0, highlightCanvas.width, highlightCanvas.height);
+
+    // If highlights are disabled, just clear and return
+    if (!showHighlights) {
+      return;
+    }
 
     const pageEvidence = evidenceByPage[pageNum] || [];
     
@@ -283,7 +287,7 @@ export default function EnhancedPDFViewer({
     });
 
     console.log(`📊 Highlight rendering summary for page ${pageNum}: ${renderedCount} rendered, ${skippedCount} skipped`);
-  }, [evidenceByPage, selectedEvidenceId, hoveredEvidenceId]);
+  }, [evidenceByPage, selectedEvidenceId, hoveredEvidenceId, showHighlights, enabledCategories]);
 
   // Render a specific page
   const renderPage = useCallback(async (pageNum: number) => {
@@ -318,9 +322,10 @@ export default function EnhancedPDFViewer({
       const renderContext = {
         canvasContext: context,
         viewport: viewport,
+        // @ts-ignore - PDF.js render context type definition may vary
       };
 
-      await page.render(renderContext).promise;
+      await page.render(renderContext as any).promise;
 
       // Get highlight canvas and ensure it matches PDF canvas size
       const highlightCanvas = highlightCanvasRefs.current.get(pageNum);
@@ -347,7 +352,7 @@ export default function EnhancedPDFViewer({
     }
   }, [pdf, scale, renderHighlights]);
 
-  // Re-render highlights when selection or filter changes
+  // Re-render highlights when selection, filter, or visibility changes
   useEffect(() => {
     if (!pdf) {
       console.log('⏳ Waiting for PDF to load before rendering highlights');
@@ -358,7 +363,8 @@ export default function EnhancedPDFViewer({
       numPages,
       selectedEvidenceId,
       hoveredEvidenceId,
-      categoryFilter,
+      showHighlights,
+      enabledCategories: Array.from(enabledCategories),
       filteredEvidenceCount: filteredEvidence.length
     });
 
@@ -385,7 +391,7 @@ export default function EnhancedPDFViewer({
     }, 100);
 
     return () => clearTimeout(timeoutId);
-  }, [selectedEvidenceId, hoveredEvidenceId, categoryFilter, pdf, numPages, evidenceByPage, renderHighlights]);
+  }, [selectedEvidenceId, hoveredEvidenceId, showHighlights, enabledCategories, pdf, numPages, evidenceByPage, renderHighlights]);
 
   // Render pages when PDF loads or when currentPage changes
   useEffect(() => {
@@ -551,7 +557,7 @@ export default function EnhancedPDFViewer({
   }
 
   return (
-    <div className="w-full h-full flex flex-col bg-gray-100">
+    <div className="w-full h-full flex flex-col bg-gray-50">
       {/* Controls */}
       <div className="bg-white border-b border-gray-200 px-4 py-3 flex items-center justify-between shadow-sm">
         <div className="flex items-center space-x-4">
@@ -575,6 +581,20 @@ export default function EnhancedPDFViewer({
         </div>
 
         <div className="flex items-center space-x-4">
+          {/* Highlight Toggle */}
+          {filteredEvidence.length > 0 && (
+            <label className="flex items-center space-x-2 cursor-pointer">
+              <input
+                type="checkbox"
+                checked={showHighlights}
+                onChange={(e) => setShowHighlights(e.target.checked)}
+                className="w-4 h-4 text-blue-600 bg-gray-100 border-gray-300 rounded focus:ring-blue-500 focus:ring-2"
+              />
+              <span className="text-sm text-gray-700 font-medium">Show Highlights</span>
+            </label>
+          )}
+          
+          <div className="flex items-center space-x-2 border-l border-gray-300 pl-4">
           <button
             onClick={() => setScale(Math.max(0.5, scale - 0.25))}
             className="px-3 py-1.5 bg-gray-100 hover:bg-gray-200 rounded-lg text-sm font-medium"
@@ -590,6 +610,7 @@ export default function EnhancedPDFViewer({
           >
             +
           </button>
+          </div>
         </div>
 
         {pdfUrl.startsWith('blob:') && (
@@ -608,44 +629,70 @@ export default function EnhancedPDFViewer({
       </div>
 
       {/* Evidence Legend */}
-      {filteredEvidence.length > 0 && (
-        <div className="bg-blue-50 border-b border-blue-200 px-4 py-2 flex items-center space-x-4 text-xs">
+      {evidenceTraces.length > 0 && showHighlights && (
+        <div className="bg-blue-50 border-b border-blue-200 px-4 py-2 flex items-center space-x-4 text-xs flex-wrap gap-2">
           <span className="font-semibold text-gray-700">Evidence Highlights:</span>
-          <div className="flex items-center space-x-1">
-            <div className="w-4 h-4 rounded border-2" style={{ backgroundColor: getCategoryColor('bias').fill, borderColor: getCategoryColor('bias').stroke }}></div>
-            <span>Bias</span>
-          </div>
-          <div className="flex items-center space-x-1">
-            <div className="w-4 h-4 rounded border-2" style={{ backgroundColor: getCategoryColor('methodology').fill, borderColor: getCategoryColor('methodology').stroke }}></div>
-            <span>Methodology</span>
-          </div>
-          <div className="flex items-center space-x-1">
-            <div className="w-4 h-4 rounded border-2" style={{ backgroundColor: getCategoryColor('reproducibility').fill, borderColor: getCategoryColor('reproducibility').stroke }}></div>
-            <span>Reproducibility</span>
-          </div>
-          <div className="flex items-center space-x-1">
-            <div className="w-4 h-4 rounded border-2" style={{ backgroundColor: getCategoryColor('statistics').fill, borderColor: getCategoryColor('statistics').stroke }}></div>
-            <span>Statistics</span>
-          </div>
-          <div className="flex items-center space-x-1">
-            <div className="w-4 h-4 rounded border-2" style={{ backgroundColor: getCategoryColor('research_gap').fill, borderColor: getCategoryColor('research_gap').stroke }}></div>
-            <span>Research Gaps</span>
-          </div>
-          <span className="ml-4 text-gray-600">
-            {filteredEvidence.length} evidence item{filteredEvidence.length !== 1 ? 's' : ''}
+          
+          {(['bias', 'methodology', 'reproducibility', 'statistics', 'research_gap'] as const).map((category) => {
+            const isEnabled = enabledCategories.has(category);
+            const categoryCount = evidenceTraces.filter(e => e.category === category).length;
+            const categoryLabel = category === 'research_gap' ? 'Research Gaps' : category.charAt(0).toUpperCase() + category.slice(1);
+            
+            return (
+              <button
+                key={category}
+                onClick={() => {
+                  const newEnabled = new Set(enabledCategories);
+                  if (isEnabled) {
+                    newEnabled.delete(category);
+                  } else {
+                    newEnabled.add(category);
+                  }
+                  setEnabledCategories(newEnabled);
+                }}
+                className={`flex items-center space-x-1 px-2 py-1 rounded transition-all ${
+                  isEnabled
+                    ? 'bg-white hover:bg-blue-100 border border-blue-300'
+                    : 'bg-gray-200 hover:bg-gray-300 border border-gray-400 opacity-50'
+                }`}
+                title={`${isEnabled ? 'Hide' : 'Show'} ${categoryLabel} (${categoryCount} items)`}
+              >
+                <div 
+                  className="w-4 h-4 rounded border-2" 
+                  style={{ 
+                    backgroundColor: isEnabled ? getCategoryColor(category).fill : 'rgba(156, 163, 175, 0.3)',
+                    borderColor: isEnabled ? getCategoryColor(category).stroke : '#9ca3af'
+                  }}
+                ></div>
+                <span className={isEnabled ? 'text-gray-700 font-medium' : 'text-gray-500'}>
+                  {categoryLabel}
+                </span>
+                {categoryCount > 0 && (
+                  <span className={`text-xs px-1.5 py-0.5 rounded ${
+                    isEnabled ? 'bg-blue-100 text-blue-700' : 'bg-gray-300 text-gray-600'
+                  }`}>
+                    {categoryCount}
+                  </span>
+                )}
+              </button>
+            );
+          })}
+          
+          <span className="ml-4 text-gray-600 font-medium">
+            {filteredEvidence.length} evidence item{filteredEvidence.length !== 1 ? 's' : ''} shown
           </span>
         </div>
       )}
 
       {/* PDF Pages */}
-      <div ref={containerRef} className="flex-1 overflow-auto p-4">
+      <div ref={containerRef} className="flex-1 overflow-auto p-4 bg-gray-50">
         <div className="flex flex-col items-center space-y-4">
           {Array.from({ length: numPages }, (_, i) => i + 1).map((pageNum) => {
             const hasEvidence = evidenceByPage[pageNum] && evidenceByPage[pageNum].length > 0;
             return (
             <div
               key={pageNum}
-              className="relative bg-white shadow-lg"
+              className="relative bg-white shadow-md rounded-lg overflow-hidden"
               style={{ display: pageNum === currentPage ? 'block' : 'none' }}
             >
               {/* PDF Canvas */}
@@ -662,6 +709,7 @@ export default function EnhancedPDFViewer({
               />
 
               {/* Highlight Canvas Overlay */}
+              {showHighlights && (
               <canvas
                 ref={(el) => {
                   if (el) {
@@ -698,6 +746,7 @@ export default function EnhancedPDFViewer({
                   setHoverPosition(null);
                 }}
               />
+              )}
 
               {/* Score Impact Tooltip */}
               {hoveredEvidence && hoverPosition && hoveredEvidence.score_impact !== undefined && (
