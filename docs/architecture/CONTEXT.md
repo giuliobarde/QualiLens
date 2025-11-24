@@ -6,42 +6,25 @@ QualiLens is a research paper quality assessment platform that provides comprehe
 ## Context Diagram (Mermaid)
 
 ```mermaid
-graph TB
-    subgraph External Users
-        RESEARCHER[👤 Researcher<br/>Academic researcher or reviewer<br/>assessing research paper quality]
-    end
-
-    subgraph QualiLens System
-        QUALILENS[🔬 QualiLens Platform<br/>Research Paper Quality Assessment<br/><br/>Frontend: Next.js 15.5.3 - port 3001<br/>Backend: Flask 2.3.3 - port 5002<br/><br/>Features:<br/>• Multi-dimensional quality scoring<br/>• Evidence-based assessment<br/>• PDF parsing and highlighting<br/>• Agent-based orchestration<br/>• 20+ specialized analysis tools]
-    end
-
-    subgraph External Systems
-        OPENAI[🤖 OpenAI API<br/>GPT-4o-mini Language Model<br/><br/>Purpose: Text analysis and<br/>paper quality evaluation<br/>Temperature: 0.0 deterministic<br/>Auth: OPENAI_API_KEY]
-
-        PDFJS[📄 PDF.js CDN<br/>Mozilla PDF.js Worker<br/><br/>Purpose: Client-side PDF<br/>rendering and text extraction]
-
-        FILESYSTEM[💾 Local File System<br/>Temporary Storage & Caching<br/><br/>• /tmp/qualilens_uploads<br/>• score_cache.db SQLite<br/>• tool_result_cache.db SQLite]
-    end
-
-    RESEARCHER -->|1. Uploads PDF papers<br/>2. Views quality assessments<br/>3. Explores evidence with highlights<br/><br/>Protocol: HTTPS localhost:3001| QUALILENS
-
-    QUALILENS -->|Sends paper text for:<br/>• Methodology analysis<br/>• Bias detection<br/>• Statistical validation<br/>• Reproducibility assessment<br/><br/>Protocol: HTTPS REST API| OPENAI
-
-    QUALILENS -->|Loads PDF.js worker<br/>for browser-based rendering<br/><br/>Protocol: HTTPS CDN| PDFJS
-
-    QUALILENS -->|Stores:<br/>• Uploaded PDFs max 50MB<br/>• Analysis result cache<br/>• Tool execution cache<br/><br/>Protocol: File I/O| FILESYSTEM
-
-    OPENAI -.->|Returns:<br/>• Quality scores<br/>• Evidence items<br/>• Analysis results<br/><br/>Format: JSON| QUALILENS
-
-    PDFJS -.->|Returns:<br/>• Rendered PDF pages<br/>• Text content<br/><br/>Format: JavaScript objects| QUALILENS
-
-    FILESYSTEM -.->|Returns:<br/>• Cached scores<br/>• Tool results<br/><br/>Format: SQLite records| QUALILENS
-
-    style QUALILENS fill:#4A90E2,stroke:#2E5C8A,stroke-width:3px,color:#fff
-    style RESEARCHER fill:#7ED321,stroke:#5FA319,stroke-width:2px,color:#000
-    style OPENAI fill:#FF6B6B,stroke:#CC5555,stroke-width:2px,color:#fff
-    style PDFJS fill:#FFD93D,stroke:#CCB030,stroke-width:2px,color:#000
-    style FILESYSTEM fill:#A084DC,stroke:#7F67B0,stroke-width:2px,color:#fff
+graph TD
+    User[User<br/><i>Peer Reviewers</i>]
+    QualiLens[<b>QualiLens</b><br/>Research Paper<br/>Quality Assessment<br/>Platform]
+    OpenAI[OpenAI API<br/><i>gpt-4o-mini</i>]
+    Firebase[Firebase<br/><i>Database</i>]
+    
+    User -->|Upload PDF Paper<br/>Request Assessment| QualiLens
+    QualiLens -->|Quality Assessment Results<br/>PDF Highlights<br/>Downloadable Report| User
+    
+    QualiLens -->|Analysis Requests<br/>Paper Content| OpenAI
+    OpenAI -->|Analysis Results<br/>LLM Responses| QualiLens
+    
+    QualiLens -->|Store Assessment Results<br/>Cache Analyses<br/>Paper Metadata| Firebase
+    Firebase -->|Retrieve Cached Results<br/>Assessment History| QualiLens
+    
+    style QualiLens fill:#4A90E2,stroke:#2E5C8A,stroke-width:3px,color:#fff
+    style User fill:#90EE90,stroke:#228B22,stroke-width:2px
+    style OpenAI fill:#FFD700,stroke:#DAA520,stroke-width:2px
+    style Firebase fill:#FFA500,stroke:#FF8C00,stroke-width:2px
 ```
 
 ## System Actors
