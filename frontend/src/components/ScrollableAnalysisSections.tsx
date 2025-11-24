@@ -35,39 +35,306 @@ export default function ScrollableAnalysisSections({ data, className = '' }: Scr
     return colorMap[color as keyof typeof colorMap] || 'text-gray-600 hover:bg-gray-50';
   };
 
-  const renderSummary = () => (
-    <ErrorBoundary>
-      <div className="space-y-4">
-        {data?.executive_summary && (
-          <div className="bg-blue-50 p-4 rounded-lg border-l-4 border-blue-400">
-            <h4 className="font-semibold text-blue-800 mb-2">Executive Summary</h4>
-            <SafeRenderer data={data.executive_summary} className="text-sm text-blue-700" />
-          </div>
-        )}
-        
-        {data?.key_points && Array.isArray(data.key_points) && data.key_points.length > 0 && (
-          <div>
-            <h4 className="font-semibold text-gray-800 mb-2">Key Points</h4>
-            <ul className="space-y-1">
-              {data.key_points.slice(0, 3).map((point: any, index: number) => (
-                <li key={index} className="text-sm text-gray-600 flex items-start">
-                  <span className="text-blue-500 mr-2">•</span>
-                  <SafeRenderer data={point} />
-                </li>
-              ))}
-            </ul>
-          </div>
-        )}
-        
-        {data?.summary && (
-          <div>
-            <h4 className="font-semibold text-gray-800 mb-2">Detailed Summary</h4>
-            <SafeRenderer data={data.summary} className="text-sm text-gray-600 line-clamp-4" />
-          </div>
-        )}
-      </div>
-    </ErrorBoundary>
-  );
+  const renderSummary = () => {
+    // COMPLETE REFACTOR: Clean, simple approach for peer reviewers
+    // Step 1: Extract and normalize all summary data from various possible locations
+    
+    // Helper: Strip markdown code fences (```json ... ```)
+    const stripMarkdownFences = (text: string): string => {
+      if (!text || typeof text !== 'string') return text;
+      let cleaned = text.trim();
+      // Remove opening fence (```json or ```)
+      cleaned = cleaned.replace(/^```(?:json)?\s*/i, '');
+      // Remove closing fence (```)
+      cleaned = cleaned.replace(/\s*```$/g, '');
+      return cleaned.trim();
+    };
+
+    // Helper: Safely extract text, never return JSON strings
+    const safeExtractText = (value: any): string | null => {
+      if (!value) return null;
+      if (typeof value === 'string') {
+        const trimmed = value.trim();
+        // NEVER return JSON strings
+        if (trimmed.startsWith('{') || trimmed.startsWith('[')) {
+          return null;
+        }
+        return value;
+      }
+      return null;
+    };
+
+    // Helper: Safely extract array
+    const safeExtractArray = (value: any): any[] => {
+      if (!value) return [];
+      if (Array.isArray(value)) return value;
+      if (typeof value === 'string') {
+        // If it's a JSON string, try to parse it
+        const trimmed = value.trim();
+        if (trimmed.startsWith('[') || trimmed.startsWith('{')) {
+          try {
+            const parsed = JSON.parse(value);
+            if (Array.isArray(parsed)) return parsed;
+            if (typeof parsed === 'object' && parsed !== null) {
+              // Might be an object with an array field
+              const arr = parsed.items || parsed.list || parsed.data || [];
+              return Array.isArray(arr) ? arr : [];
+            }
+          } catch (e) {
+            return [];
+          }
+        }
+        return [value]; // Single string becomes array
+      }
+      return [];
+    };
+
+    // Step 2: Try to parse data.summary if it's a JSON string (including markdown-wrapped JSON)
+    let parsedSummary: any = null;
+    if (data?.summary && typeof data.summary === 'string') {
+      let summaryStr = data.summary.trim();
+      
+      // CRITICAL: Strip markdown code fences if present
+      summaryStr = stripMarkdownFences(summaryStr);
+      
+      // Try to parse as JSON
+      if (summaryStr.startsWith('{') || summaryStr.startsWith('[')) {
+        try {
+          parsedSummary = JSON.parse(summaryStr);
+          if (typeof parsedSummary !== 'object' || parsedSummary === null) {
+            parsedSummary = null;
+          }
+        } catch (e) {
+          // Parsing failed, try to extract JSON from the string
+          // Sometimes there might be extra text before/after JSON
+          const jsonMatch = summaryStr.match(/\{[\s\S]*\}/);
+          if (jsonMatch) {
+            try {
+              parsedSummary = JSON.parse(jsonMatch[0]);
+              if (typeof parsedSummary !== 'object' || parsedSummary === null) {
+                parsedSummary = null;
+              }
+            } catch (e2) {
+              parsedSummary = null;
+            }
+          } else {
+            parsedSummary = null;
+          }
+        }
+      }
+    } else if (data?.summary && typeof data.summary === 'object') {
+      parsedSummary = data.summary;
+    }
+
+    // Step 3: Extract all fields with clear priority
+    // Priority: parsedSummary > data (top-level fields)
+    const summaryText = parsedSummary?.summary 
+      ? safeExtractText(parsedSummary.summary)
+      : safeExtractText(data?.summary);
+    
+    const executiveSummary = safeExtractText(data?.executive_summary);
+    
+    const keyPoints = parsedSummary?.key_points 
+      ? safeExtractArray(parsedSummary.key_points)
+      : safeExtractArray(data?.key_points);
+    
+    const methodologyHighlights = parsedSummary?.methodology_highlights
+      ? safeExtractText(parsedSummary.methodology_highlights)
+      : safeExtractText(data?.methodology_highlights);
+    
+    const mainResults = parsedSummary?.main_results
+      ? safeExtractText(parsedSummary.main_results)
+      : safeExtractText(data?.main_results);
+    
+    const implications = parsedSummary?.implications
+      ? safeExtractText(parsedSummary.implications)
+      : safeExtractText(data?.implications);
+    
+    const strengths = parsedSummary?.strengths
+      ? safeExtractArray(parsedSummary.strengths)
+      : safeExtractArray(data?.summary_strengths || data?.strengths);
+    
+    const limitations = parsedSummary?.limitations
+      ? safeExtractArray(parsedSummary.limitations)
+      : safeExtractArray(data?.limitations);
+
+    // Step 4: Render the summary sections - clean, professional display for peer reviewers
+    return (
+      <ErrorBoundary>
+        <div className="space-y-6">
+          {/* Executive Summary */}
+          {executiveSummary && (
+            <div className="bg-gradient-to-r from-blue-50 to-indigo-50 p-5 rounded-xl border-l-4 border-blue-500 shadow-sm">
+              <div className="flex items-center mb-3">
+                <svg className="w-5 h-5 text-blue-600 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                </svg>
+                <h4 className="font-bold text-blue-900 text-lg">Executive Summary</h4>
+              </div>
+              <p className="text-sm text-blue-800 leading-relaxed whitespace-pre-wrap">
+                {executiveSummary}
+              </p>
+            </div>
+          )}
+          
+          {/* Main Summary Text */}
+          {summaryText && (
+            <div className="bg-white border-2 border-gray-200 rounded-xl p-5 hover:border-blue-300 transition-all shadow-sm">
+              <div className="flex items-center mb-4">
+                <svg className="w-5 h-5 text-gray-600 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                </svg>
+                <h4 className="font-bold text-gray-800 text-lg">Summary</h4>
+              </div>
+              <div className="bg-gray-50 p-4 rounded-lg border border-gray-200">
+                <p className="text-sm text-gray-700 leading-relaxed whitespace-pre-wrap">{summaryText}</p>
+              </div>
+            </div>
+          )}
+          
+          {/* Key Points */}
+          {keyPoints.length > 0 && (
+            <div className="bg-white border-2 border-gray-200 rounded-xl p-5 hover:border-blue-300 transition-all shadow-sm">
+              <div className="flex items-center justify-between mb-4">
+                <div className="flex items-center">
+                  <svg className="w-5 h-5 text-blue-600 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-6 9l2 2 4-4" />
+                  </svg>
+                  <h4 className="font-bold text-gray-800 text-lg">Key Points</h4>
+                </div>
+                <span className="text-xs text-gray-500 bg-gray-100 px-2 py-1 rounded-full">{keyPoints.length}</span>
+              </div>
+              <div className="space-y-3">
+                {keyPoints.map((point: any, index: number) => {
+                  const pointText = typeof point === 'string' ? point : (point.text || point.content || point.description || String(point));
+                  return (
+                    <div key={index} className="bg-gradient-to-r from-blue-50 to-indigo-50 p-4 rounded-lg border border-blue-200 hover:shadow-md transition-all">
+                      <div className="flex items-start space-x-3">
+                        <div className="flex-shrink-0 w-6 h-6 bg-blue-500 text-white rounded-full flex items-center justify-center text-xs font-bold">
+                          {index + 1}
+                        </div>
+                        <p className="text-sm text-gray-700 flex-1 leading-relaxed">{pointText}</p>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+          
+          {/* Methodology Highlights */}
+          {methodologyHighlights && (
+            <div className="bg-white border-2 border-green-200 rounded-xl p-5 hover:border-green-300 transition-all shadow-sm">
+              <div className="flex items-center mb-4">
+                <svg className="w-5 h-5 text-green-600 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-3 7h3m-3 4h3m-6-4h.01M9 16h.01" />
+                </svg>
+                <h4 className="font-bold text-gray-800 text-lg">Methodology Highlights</h4>
+              </div>
+              <div className="bg-green-50 p-4 rounded-lg border border-green-200">
+                <p className="text-sm text-gray-700 leading-relaxed whitespace-pre-wrap">{methodologyHighlights}</p>
+              </div>
+            </div>
+          )}
+          
+          {/* Main Results */}
+          {mainResults && (
+            <div className="bg-white border-2 border-purple-200 rounded-xl p-5 hover:border-purple-300 transition-all shadow-sm">
+              <div className="flex items-center mb-4">
+                <svg className="w-5 h-5 text-purple-600 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" />
+                </svg>
+                <h4 className="font-bold text-gray-800 text-lg">Main Results</h4>
+              </div>
+              <div className="bg-purple-50 p-4 rounded-lg border border-purple-200">
+                <p className="text-sm text-gray-700 leading-relaxed whitespace-pre-wrap">{mainResults}</p>
+              </div>
+            </div>
+          )}
+          
+          {/* Implications */}
+          {implications && (
+            <div className="bg-white border-2 border-indigo-200 rounded-xl p-5 hover:border-indigo-300 transition-all shadow-sm">
+              <div className="flex items-center mb-4">
+                <svg className="w-5 h-5 text-indigo-600 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 10V3L4 14h7v7l9-11h-7z" />
+                </svg>
+                <h4 className="font-bold text-gray-800 text-lg">Implications</h4>
+              </div>
+              <div className="bg-indigo-50 p-4 rounded-lg border border-indigo-200">
+                <p className="text-sm text-gray-700 leading-relaxed whitespace-pre-wrap">{implications}</p>
+              </div>
+            </div>
+          )}
+          
+          {/* Strengths */}
+          {strengths.length > 0 && (
+            <div className="bg-white border-2 border-green-200 rounded-xl p-5 hover:border-green-300 transition-all shadow-sm">
+              <div className="flex items-center justify-between mb-4">
+                <div className="flex items-center">
+                  <svg className="w-5 h-5 text-green-600 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
+                  </svg>
+                  <h4 className="font-bold text-gray-800 text-lg">Strengths</h4>
+                </div>
+                <span className="text-xs text-gray-500 bg-gray-100 px-2 py-1 rounded-full">{strengths.length}</span>
+              </div>
+              <div className="space-y-2">
+                {strengths.map((strength: any, index: number) => {
+                  const strengthText = typeof strength === 'string' ? strength : (strength.text || strength.content || strength.description || String(strength));
+                  return (
+                    <div key={index} className="bg-green-50 p-3 rounded-lg border border-green-200 flex items-start space-x-2">
+                      <svg className="w-5 h-5 text-green-600 flex-shrink-0 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+                      </svg>
+                      <p className="text-sm text-gray-700 flex-1">{strengthText}</p>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+
+          {/* Limitations */}
+          {limitations.length > 0 && (
+            <div className="bg-white border-2 border-orange-200 rounded-xl p-5 hover:border-orange-300 transition-all shadow-sm">
+              <div className="flex items-center justify-between mb-4">
+                <div className="flex items-center">
+                  <svg className="w-5 h-5 text-orange-600 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+                  </svg>
+                  <h4 className="font-bold text-gray-800 text-lg">Limitations</h4>
+                </div>
+                <span className="text-xs text-gray-500 bg-gray-100 px-2 py-1 rounded-full">{limitations.length}</span>
+              </div>
+              <div className="space-y-2">
+                {limitations.map((limitation: any, index: number) => {
+                  const limitationText = typeof limitation === 'string' ? limitation : (limitation.text || limitation.content || limitation.description || String(limitation));
+                  return (
+                    <div key={index} className="bg-orange-50 p-3 rounded-lg border border-orange-200 flex items-start space-x-2">
+                      <svg className="w-5 h-5 text-orange-600 flex-shrink-0 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+                      </svg>
+                      <p className="text-sm text-gray-700 flex-1">{limitationText}</p>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+
+          {/* Fallback message if no summary data */}
+          {!summaryText && keyPoints.length === 0 && !methodologyHighlights && !mainResults && !implications && strengths.length === 0 && limitations.length === 0 && !executiveSummary && (
+            <div className="bg-gray-50 p-6 rounded-lg border border-gray-200 text-center">
+              <p className="text-sm text-gray-600">
+                No summary information available for this analysis.
+              </p>
+            </div>
+          )}
+        </div>
+      </ErrorBoundary>
+    );
+  };
 
   const renderMethodology = () => {
     const methodologies = data?.detected_methodologies?.methodologies || [];

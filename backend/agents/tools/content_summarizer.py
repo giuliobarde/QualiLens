@@ -100,7 +100,8 @@ class ContentSummarizerTool(BaseTool):
             else:  # comprehensive
                 summary_result = self._generate_comprehensive_summary(text_content, max_length, focus_areas)
             
-            return {
+            # For comprehensive summaries, extract all fields
+            result = {
                 "success": True,
                 "summary_type": summary_type,
                 "summary": summary_result.get("summary", ""),
@@ -110,6 +111,16 @@ class ContentSummarizerTool(BaseTool):
                 "focus_areas": focus_areas or [],
                 "tool_used": "content_summarizer_tool"
             }
+            
+            # Add comprehensive summary fields if available
+            if summary_type == "comprehensive":
+                result["methodology_highlights"] = summary_result.get("methodology_highlights", "")
+                result["main_results"] = summary_result.get("main_results", "")
+                result["implications"] = summary_result.get("implications", "")
+                result["strengths"] = summary_result.get("strengths", [])
+                result["limitations"] = summary_result.get("limitations", [])
+            
+            return result
             
         except Exception as e:
             logger.error(f"Content summarization failed: {str(e)}")
@@ -338,15 +349,51 @@ Provide a thorough but concise overview of the entire research.
             )
             
             if llm_response:
+                # CRITICAL: Strip markdown code fences if present (```json ... ```)
+                cleaned_response = llm_response.strip()
+                # Remove opening fence (```json or ```)
+                if cleaned_response.startswith("```"):
+                    # Find the first newline after ```
+                    first_newline = cleaned_response.find("\n")
+                    if first_newline > 0:
+                        cleaned_response = cleaned_response[first_newline:].strip()
+                    else:
+                        # No newline, just remove ```
+                        cleaned_response = cleaned_response.replace("```json", "").replace("```", "").strip()
+                    # Remove closing fence (```)
+                    if cleaned_response.endswith("```"):
+                        cleaned_response = cleaned_response[:-3].strip()
+                
                 try:
-                    result = json.loads(llm_response)
+                    result = json.loads(cleaned_response)
                     result["word_count"] = len(result.get("summary", "").split())
+                    # CRITICAL: Ensure we return a proper dict, not a JSON string
+                    # If the LLM returned the entire JSON as a string in the summary field, extract it
+                    if isinstance(result.get("summary"), str) and result.get("summary", "").strip().startswith("{"):
+                        try:
+                            # The summary field itself is JSON, parse it
+                            nested_json = json.loads(result["summary"])
+                            # Merge the nested JSON into the result
+                            result.update(nested_json)
+                        except:
+                            # If parsing fails, keep the original structure
+                            pass
                     return result
                 except json.JSONDecodeError:
+                    # If LLM response is not JSON, try to extract JSON from it
+                    if cleaned_response.startswith("{") or cleaned_response.startswith("["):
+                        try:
+                            # Try parsing the entire response as JSON
+                            result = json.loads(cleaned_response)
+                            result["word_count"] = len(result.get("summary", "").split())
+                            return result
+                        except:
+                            pass
+                    # Fallback: return as plain text summary
                     return {
-                        "summary": llm_response,
+                        "summary": cleaned_response,
                         "key_points": [],
-                        "word_count": len(llm_response.split())
+                        "word_count": len(cleaned_response.split())
                     }
             else:
                 return {"error": "No response from LLM"}

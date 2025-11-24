@@ -572,9 +572,74 @@ class PaperAnalysisAgent(BaseAgent):
             # Add content summary if available
             if "content_summary" in analysis_results:
                 summary_data = analysis_results["content_summary"]
-                integrated_result["executive_summary"] = summary_data.get("executive_summary", "")
-                integrated_result["key_points"] = summary_data.get("key_points", [])
-                integrated_result["summary"] = summary_data.get("summary", "")
+                
+                # CRITICAL FIX: If summary is a JSON string (possibly wrapped in markdown), parse it and extract all fields
+                summary_field = summary_data.get("summary", "")
+                if isinstance(summary_field, str):
+                    # Strip markdown code fences if present (```json ... ```)
+                    cleaned_summary = summary_field.strip()
+                    if cleaned_summary.startswith("```"):
+                        # Find the first newline after ```
+                        first_newline = cleaned_summary.find("\n")
+                        if first_newline > 0:
+                            cleaned_summary = cleaned_summary[first_newline:].strip()
+                        else:
+                            # No newline, just remove ```
+                            cleaned_summary = cleaned_summary.replace("```json", "").replace("```", "").strip()
+                        # Remove closing fence (```)
+                        if cleaned_summary.endswith("```"):
+                            cleaned_summary = cleaned_summary[:-3].strip()
+                    
+                    # Try to parse as JSON
+                    if cleaned_summary.startswith("{") or cleaned_summary.startswith("["):
+                        try:
+                            import json
+                            parsed_summary = json.loads(cleaned_summary)
+                            # If parsing successful, merge all fields from parsed JSON
+                            if isinstance(parsed_summary, dict):
+                                # Extract all fields from parsed JSON
+                                integrated_result["summary"] = parsed_summary.get("summary", "")
+                                integrated_result["key_points"] = parsed_summary.get("key_points", summary_data.get("key_points", []))
+                                integrated_result["methodology_highlights"] = parsed_summary.get("methodology_highlights", "")
+                                integrated_result["main_results"] = parsed_summary.get("main_results", "")
+                                integrated_result["implications"] = parsed_summary.get("implications", "")
+                                integrated_result["summary_strengths"] = parsed_summary.get("strengths", [])
+                                if "limitations" not in integrated_result or not integrated_result.get("limitations"):
+                                    integrated_result["limitations"] = parsed_summary.get("limitations", [])
+                                integrated_result["executive_summary"] = parsed_summary.get("executive_summary", summary_data.get("executive_summary", ""))
+                            else:
+                                # Parsed but not a dict, use original structure
+                                integrated_result["executive_summary"] = summary_data.get("executive_summary", "")
+                                integrated_result["key_points"] = summary_data.get("key_points", [])
+                                integrated_result["summary"] = cleaned_summary
+                        except (json.JSONDecodeError, ValueError):
+                            # JSON parsing failed, use cleaned string (without markdown fences)
+                            integrated_result["executive_summary"] = summary_data.get("executive_summary", "")
+                            integrated_result["key_points"] = summary_data.get("key_points", [])
+                            integrated_result["summary"] = cleaned_summary
+                    else:
+                        # Not JSON, use as-is
+                        integrated_result["executive_summary"] = summary_data.get("executive_summary", "")
+                        integrated_result["key_points"] = summary_data.get("key_points", [])
+                        integrated_result["summary"] = cleaned_summary
+                else:
+                    # Normal case: summary is already a string or structured data
+                    integrated_result["executive_summary"] = summary_data.get("executive_summary", "")
+                    integrated_result["key_points"] = summary_data.get("key_points", [])
+                    integrated_result["summary"] = summary_field
+                    # Add comprehensive summary fields if available
+                    if "methodology_highlights" in summary_data:
+                        integrated_result["methodology_highlights"] = summary_data.get("methodology_highlights", "")
+                    if "main_results" in summary_data:
+                        integrated_result["main_results"] = summary_data.get("main_results", "")
+                    if "implications" in summary_data:
+                        integrated_result["implications"] = summary_data.get("implications", "")
+                    if "strengths" in summary_data:
+                        integrated_result["summary_strengths"] = summary_data.get("strengths", [])
+                    if "limitations" in summary_data:
+                        # Note: limitations might already be set from bias analysis, so we merge or use summary limitations
+                        if "limitations" not in integrated_result or not integrated_result["limitations"]:
+                            integrated_result["limitations"] = summary_data.get("limitations", [])
             
             # Add bias analysis if available
             if "bias_analysis" in analysis_results:
