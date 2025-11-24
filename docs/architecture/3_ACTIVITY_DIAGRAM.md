@@ -1,63 +1,6 @@
-## 1. Level 1: Main End-to-End Process (High-Level)
+### Activity diagrams
 
-```mermaid
-graph TD
-    Start([Start]) --> Upload[Upload Research Paper PDF]
-    Upload --> Validate{Valid PDF?}
-    Validate -->|No| Error1[Display Error Message]
-    Error1 --> End1([End])
-    Validate -->|Yes| CreateTemp[Create Temporary File]
-    CreateTemp --> ParsePDF[Parse PDF & Extract Text]
-    ParsePDF --> ParseSuccess{Parsing Successful?}
-    ParseSuccess -->|No| Error2[Return Parsing Error]
-    Error2 --> End2([End])
-    ParseSuccess -->|Yes| InitEvidence[Initialize Evidence Collector]
-    InitEvidence --> RunAnalysis[Run Multi-Tool Analysis Pipeline]
-    RunAnalysis --> CollectEvidence[Collect Evidence from All Tools]
-    CollectEvidence --> CalculateScore[Calculate Evidence-Based Score]
-    CalculateScore --> IntegrateResults[Integrate All Analysis Results]
-    IntegrateResults --> FormatResponse[Format JSON Response]
-    FormatResponse --> DisplayResults[Display Results with PDF Highlights]
-    DisplayResults --> UserAction{User Action?}
-    UserAction -->|Export| Export[Export Analysis to JSON]
-    Export --> End3([End])
-    UserAction -->|Clear| Clear[Clear Results & Reset]
-    Clear --> End4([End])
-    UserAction -->|View Evidence| ViewEvidence[Show Evidence Details Modal]
-    ViewEvidence --> UserAction
-    
-    subgraph "Frontend (Next.js)"
-        Upload
-        Validate
-        Error1
-        DisplayResults
-        UserAction
-        Export
-        Clear
-        ViewEvidence
-    end
-    
-    subgraph "Backend (Flask API)"
-        CreateTemp
-        ParsePDF
-        ParseSuccess
-        Error2
-        InitEvidence
-        RunAnalysis
-        CollectEvidence
-        CalculateScore
-        IntegrateResults
-        FormatResponse
-    end
-    
-    style Start fill:#90EE90
-    style End1 fill:#FFB6C1
-    style End2 fill:#FFB6C1
-    style End3 fill:#90EE90
-    style End4 fill:#90EE90
-```
-
-## 2. Level 2A: PDF Upload and Parsing Sub-Process
+## 1. PDF Upload and Parsing Sub-Process
 
 ```mermaid
 graph TD
@@ -130,7 +73,7 @@ graph TD
     style End4 fill:#FFB6C1
 ```
 
-## 3. Level 2B: Multi-Tool Analysis Pipeline
+## 2. Multi-Tool Analysis Pipeline
 
 ```mermaid
 graph TD
@@ -220,14 +163,6 @@ graph TD
         Tool8
     end
     
-    subgraph "External Services"
-        LLM1
-        LLM2
-        LLM3
-        LLM4
-        LLM5
-    end
-    
     subgraph "Cache Database"
         Cache
         CacheHit
@@ -240,104 +175,7 @@ graph TD
     style Sync1 fill:#FFD700
 ```
 
-## 4. Level 2C: Evidence Collection and Scoring Sub-Process
-
-```mermaid
-graph TD
-    Start([Evidence Collection Start]) --> ToolFinding[Analysis Tool Identifies Finding]
-    ToolFinding --> ExtractSnippet[Extract Text Snippet from Paper]
-    ExtractSnippet --> AddEvidence[Call evidence_collector.add_evidence]
-    AddEvidence --> CheckPage{Page Number Provided?}
-    CheckPage -->|Yes| UsePage[Use Provided Page Number]
-    CheckPage -->|No| DetectPage[Detect Page Number]
-    DetectPage --> FuzzyMatch[Fuzzy Match Text to Pages]
-    FuzzyMatch --> MatchFound{Match Found >= 50%?}
-    MatchFound -->|Yes| PageFound[Use Detected Page]
-    MatchFound -->|No| DefaultPage[Default to Page 1]
-    UsePage --> CheckBox{Bounding Box Provided?}
-    PageFound --> CheckBox
-    DefaultPage --> CheckBox
-    
-    CheckBox -->|Yes| UseBox[Use Provided Bounding Box]
-    CheckBox -->|No| CalcBox[Calculate Bounding Box]
-    
-    CalcBox --> Strategy1{Exact Substring Match?}
-    Strategy1 -->|Yes| ExactBox[Use Exact Block Coordinates]
-    Strategy1 -->|No| Strategy2{High-Precision Fuzzy >= 80%?}
-    Strategy2 -->|Yes| FuzzyBox[Use Fuzzy Match Coordinates]
-    Strategy2 -->|No| Strategy3{Phrase Match Found?}
-    Strategy3 -->|Yes| PhraseBox[Use Phrase Match Coordinates]
-    Strategy3 -->|No| EstimateBox[Estimate Bounding Box]
-    
-    UseBox --> CreateEvidence[Create EvidenceItem Object]
-    ExactBox --> CreateEvidence
-    FuzzyBox --> CreateEvidence
-    PhraseBox --> CreateEvidence
-    EstimateBox --> CreateEvidence
-    
-    CreateEvidence --> AssignID[Assign Unique ID]
-    AssignID --> StoreEvidence[Store in evidence_collector]
-    StoreEvidence --> MoreFindings{More Findings?}
-    MoreFindings -->|Yes| ToolFinding
-    MoreFindings -->|No| AllComplete[All Tools Complete]
-    
-    AllComplete --> GetAllEvidence[Get All Evidence Items]
-    GetAllEvidence --> GroupByCategory[Group Evidence by Category]
-    GroupByCategory --> CalcMethodology[Calculate Methodology Score]
-    CalcMethodology --> CalcBias[Calculate Bias Score]
-    CalcBias --> CalcRepro[Calculate Reproducibility Score]
-    CalcRepro --> CalcStats[Calculate Statistics Score]
-    CalcStats --> ApplyWeights[Apply Weighted Formula]
-    ApplyWeights --> Formula["Final = (Method × 0.6) + (Bias × 0.2) + (Repro × 0.1) + (Stats × 0.1)"]
-    Formula --> ClampScore[Clamp to 0-100 Range]
-    ClampScore --> PackageResult[Package Scoring Result]
-    PackageResult --> End([Scoring Complete])
-    
-    subgraph "Evidence Collection Phase"
-        ToolFinding
-        ExtractSnippet
-        AddEvidence
-        CheckPage
-        UsePage
-        DetectPage
-        FuzzyMatch
-        MatchFound
-        PageFound
-        DefaultPage
-        CheckBox
-        UseBox
-        CalcBox
-        Strategy1
-        Strategy2
-        Strategy3
-        ExactBox
-        FuzzyBox
-        PhraseBox
-        EstimateBox
-        CreateEvidence
-        AssignID
-        StoreEvidence
-        MoreFindings
-    end
-    
-    subgraph "Scoring Phase"
-        GetAllEvidence
-        GroupByCategory
-        CalcMethodology
-        CalcBias
-        CalcRepro
-        CalcStats
-        ApplyWeights
-        Formula
-        ClampScore
-        PackageResult
-    end
-    
-    style Start fill:#90EE90
-    style End fill:#90EE90
-```
-
-## 5. Level 2D: Results Visualization and User Interaction
+## 3. Results Visualization and User Interaction
 
 ```mermaid
 graph TD
@@ -467,7 +305,7 @@ graph TD
     style SyncPoint fill:#FFD700
 ```
 
-## 6. Error Handling Process Model
+## 4. Error Handling Process Model
 
 ```mermaid
 graph TD
