@@ -26,7 +26,6 @@ graph TD
     style UC01 fill:#87CEEB
 ```
 
-**Note:** MIME type validation is performed server-side as part of S-FR1 (PDF Parsing Engine), not in the client-side upload flow.
 
 ## U-FR2: Metadata Visualization
 
