@@ -19,7 +19,12 @@ graph TD
     Upload --> ServerValidate{Server Validation}
     ServerValidate -->|Invalid| Error400[Return 400 Bad Request]
     Error400 --> End3([End])
-    ServerValidate -->|Valid| TempFile[Create Temporary File in /tmp]
+    ServerValidate -->|Valid| ValidateMIME[Validate MIME Type & File Size]
+    ValidateMIME -->|Invalid MIME| ErrorMIME[Return 400: Invalid file type]
+    ErrorMIME --> End3
+    ValidateMIME -->|Too Large| ErrorSize2[Return 400: File exceeds 50MB]
+    ErrorSize2 --> End3
+    ValidateMIME -->|Valid| TempFile[Create Temporary File in /tmp]
     TempFile --> PyMuPDF[Parse with PyMuPDF]
     PyMuPDF --> PyMuPDFSuccess{Success?}
     PyMuPDFSuccess -->|No| Fallback[Try PDFMiner Fallback]
@@ -49,6 +54,9 @@ graph TD
         Upload
         ServerValidate
         Error400
+        ValidateMIME
+        ErrorMIME
+        ErrorSize2
         TempFile
     end
     

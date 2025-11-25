@@ -7,16 +7,16 @@ graph TD
     subgraph "QualiLens System"
         UC01[Upload Research Paper PDF]
         UC01a[Select PDF File]
-        UC01b[Validate File Type and Size]
+        UC01b[Validate File Size Client-Side]
         UC01c[Generate File Preview]
         UC01d[Send File to Backend]
         UC01e[Drag and Drop File]
         
-        UC01 -.->|<<include>>| UC01a
-        UC01 -.->|<<include>>| UC01b
-        UC01 -.->|<<include>>| UC01c
-        UC01 -.->|<<include>>| UC01d
-        UC01a -.->|<<include>>| UC01e
+        UC01 -.-> UC01a
+        UC01 -.-> UC01b
+        UC01 -.-> UC01c
+        UC01 -.-> UC01d
+        UC01a -.-> UC01e
     end
     
     User -->|uploads| UC01
@@ -25,6 +25,8 @@ graph TD
     style User fill:#90EE90
     style UC01 fill:#87CEEB
 ```
+
+**Note:** MIME type validation is performed server-side as part of S-FR1 (PDF Parsing Engine), not in the client-side upload flow.
 
 ## U-FR2: Metadata Visualization
 
@@ -40,10 +42,10 @@ graph TD
         UC02d[Show Sample Characteristics in Methodology Section]
         UC02e[Show Statistical Tests Used in Statistics Section]
         
-        UC02 -.->|<<include>>| UC02a
-        UC02 -.->|<<include>>| UC02c
-        UC02 -.->|<<include>>| UC02d
-        UC02 -.->|<<include>>| UC02e
+        UC02 -.-> UC02a
+        UC02 -.-> UC02c
+        UC02 -.-> UC02d
+        UC02 -.-> UC02e
     end
     
     User -->|views| UC02
@@ -72,14 +74,14 @@ graph TD
         UC03g[Display Scoring Explanation]
         UC03h[Show Evidence References]
         
-        UC03 -.->|<<include>>| UC03a
-        UC03 -.->|<<include>>| UC03b
-        UC03b -.->|<<include>>| UC03c
-        UC03b -.->|<<include>>| UC03d
-        UC03b -.->|<<include>>| UC03e
-        UC03b -.->|<<include>>| UC03f
-        UC03 -.->|<<include>>| UC03g
-        UC03g -.->|<<include>>| UC03h
+        UC03 -.-> UC03a
+        UC03 -.-> UC03b
+        UC03b -.-> UC03c
+        UC03b -.-> UC03d
+        UC03b -.-> UC03e
+        UC03b -.-> UC03f
+        UC03 -.-> UC03g
+        UC03g -.-> UC03h
     end
     
     User -->|views| UC03
@@ -100,31 +102,15 @@ graph TD
         UC04[View Evidence Visualization]
         UC04a[Display PDF with Highlights]
         UC04b[Show Color-Coded Evidence]
-        UC04c[View Evidence Details Modal]
-        UC04d[Filter Evidence by Category]
-        UC04e[Navigate to Evidence in PDF]
-        UC04f[Export Evidence Screenshot]
         
-        UC04 -.->|<<include>>| UC04a
-        UC04a -.->|<<include>>| UC04b
-        UC04c -.->|<<extend>>| UC04
-        UC04d -.->|<<extend>>| UC04
-        UC04e -.->|<<extend>>| UC04
-        UC04f -.->|<<extend>>| UC04
+        UC04 -.-> UC04a
+        UC04a -.-> UC04b
     end
     
     User -->|interacts with| UC04
-    User -->|clicks evidence| UC04c
-    User -->|filters| UC04d
-    User -->|navigates| UC04e
-    User -->|exports| UC04f
     
     style User fill:#90EE90
     style UC04 fill:#87CEEB
-    style UC04c fill:#DDA0DD
-    style UC04d fill:#DDA0DD
-    style UC04e fill:#DDA0DD
-    style UC04f fill:#DDA0DD
 ```
 
 ## U-FR5: Bias Reporting Dashboard
@@ -144,12 +130,11 @@ graph TD
         UC05e[Show Confounding Factors]
         UC05f[Provide Mitigation Suggestions]
         
-        UC05 -.->|<<include>>| UC05a
-        UC05 -.->|<<include>>| UC05b
-        UC05b -.->|<<include>>| UC05c
-        UC05 -.->|<<include>>| UC05d
-        UC05 -.->|<<include>>| UC05e
-        UC05f -.->|<<extend>>| UC05
+        UC05 -.-> UC05a
+        UC05 -.-> UC05b
+        UC05b -.-> UC05c
+        UC05 -.-> UC05d
+        UC05 -.-> UC05e
     end
     
     User -->|views| UC05
@@ -160,7 +145,6 @@ graph TD
     style System fill:#FFD700
     style OpenAI fill:#FFA500
     style UC05 fill:#87CEEB
-    style UC05f fill:#DDA0DD
 ```
 
 ## U-FR6: Reproducibility Summary
@@ -175,20 +159,14 @@ graph TD
         UC06a[Scan for Reproducibility Indicators]
         UC06b[Display Data Availability]
         UC06c[Display Code Availability]
-        UC06d[Show Preregistration Status]
-        UC06e[Display Supplementary Materials]
         UC06f[Calculate Reproducibility Score]
         UC06g[Show Reproducibility Barriers]
-        UC06h[Provide Direct Links]
         
-        UC06 -.->|<<include>>| UC06a
-        UC06 -.->|<<include>>| UC06b
-        UC06 -.->|<<include>>| UC06c
-        UC06 -.->|<<include>>| UC06f
-        UC06 -.->|<<include>>| UC06g
-        UC06d -.->|<<extend>>| UC06
-        UC06e -.->|<<extend>>| UC06
-        UC06h -.->|<<extend>>| UC06
+        UC06 -.-> UC06a
+        UC06 -.-> UC06b
+        UC06 -.-> UC06c
+        UC06 -.-> UC06f
+        UC06 -.-> UC06g
     end
     
     User -->|views| UC06
@@ -197,12 +175,6 @@ graph TD
     style User fill:#90EE90
     style System fill:#FFD700
     style UC06 fill:#87CEEB
-    style UC06d fill:#FFB6C1
-    style UC06e fill:#FFB6C1
-    style UC06h fill:#FFB6C1
-    
-    Note6a[Note: UC06d, UC06e, and UC06h - Future Features]
-    style Note6a fill:#FFFF99
 ```
 
 ## U-FR7: Rubric Customization
@@ -218,37 +190,21 @@ graph TD
         UC07a[Adjust Criterion Weights]
         UC07b[Modify Scoring Thresholds]
         UC07c[Validate Weight Sum to 100%]
-        UC07d[Preview Score Recalculation]
-        UC07e[Save Custom Rubric]
-        UC07f[Load Saved Rubric]
-        UC07g[Share Rubric with Team]
         
-        UC07 -.->|<<include>>| UC07a
-        UC07 -.->|<<include>>| UC07b
-        UC07 -.->|<<include>>| UC07c
-        UC07d -.->|<<extend>>| UC07
-        UC07e -.->|<<extend>>| UC07
-        UC07f -.->|<<extend>>| UC07
-        UC07g -.->|<<extend>>| UC07
+        UC07 -.-> UC07a
+        UC07 -.-> UC07b
+        UC07 -.-> UC07c
     end
     
     User -->|customizes| UC07
     System -->|validates| UC07c
-    Firebase -->|stores| UC07e
-    Firebase -->|retrieves| UC07f
     
     style User fill:#90EE90
     style System fill:#FFD700
-    style Firebase fill:#FFA500
     style UC07 fill:#FFB6C1
-    style UC07d fill:#DDA0DD
-    style UC07e fill:#DDA0DD
-    style UC07f fill:#DDA0DD
-    style UC07g fill:#DDA0DD
-    
-    Note1[Note: Future Feature - Not Implemented]
-    style Note1 fill:#FFFF99
 ```
+
+**Note:** Future Feature - Not Implemented
 
 ## U-FR8: Evaluation History
 
@@ -261,40 +217,20 @@ graph TD
     subgraph "QualiLens System"
         UC08[View Evaluation History]
         UC08a[Display Chronological Analysis List]
-        UC08b[Filter by Date Range]
-        UC08c[Filter by Author or Topic]
-        UC08d[Search Analysis History]
-        UC08e[View Historical Analysis Details]
-        UC08f[Compare Analysis Versions]
-        UC08g[Re-run Analysis with Updated Model]
         
-        UC08 -.->|<<include>>| UC08a
-        UC08b -.->|<<extend>>| UC08
-        UC08c -.->|<<extend>>| UC08
-        UC08d -.->|<<extend>>| UC08
-        UC08e -.->|<<extend>>| UC08
-        UC08f -.->|<<extend>>| UC08
-        UC08g -.->|<<extend>>| UC08
+        UC08 -.-> UC08a
     end
     
     User -->|views| UC08
     Firebase -->|retrieves| UC08a
-    System -->|executes| UC08g
     
     style User fill:#90EE90
     style System fill:#FFD700
     style Firebase fill:#FFA500
     style UC08 fill:#FFB6C1
-    style UC08b fill:#DDA0DD
-    style UC08c fill:#DDA0DD
-    style UC08d fill:#DDA0DD
-    style UC08e fill:#DDA0DD
-    style UC08f fill:#DDA0DD
-    style UC08g fill:#DDA0DD
-    
-    Note2[Note: Future Feature - Not Implemented]
-    style Note2 fill:#FFFF99
 ```
+
+**Note:** Future Feature - Not Implemented
 
 ## U-FR9: Literature Benchmarking and Similarity Analysis
 
@@ -311,17 +247,13 @@ graph TD
         UC09d[Display Comparative Metrics]
         UC09e[Show Quality Benchmarks]
         UC09f[Display Citation Overlaps]
-        UC09g[Filter by Domain or Year]
-        UC09h[Visualize Similarity Heatmap]
         
-        UC09 -.->|<<include>>| UC09a
-        UC09 -.->|<<include>>| UC09b
-        UC09 -.->|<<include>>| UC09c
-        UC09 -.->|<<include>>| UC09d
-        UC09 -.->|<<include>>| UC09e
-        UC09 -.->|<<include>>| UC09f
-        UC09g -.->|<<extend>>| UC09
-        UC09h -.->|<<extend>>| UC09
+        UC09 -.-> UC09a
+        UC09 -.-> UC09b
+        UC09 -.-> UC09c
+        UC09 -.-> UC09d
+        UC09 -.-> UC09e
+        UC09 -.-> UC09f
     end
     
     User -->|initiates| UC09
@@ -330,12 +262,9 @@ graph TD
     style User fill:#90EE90
     style System fill:#FFD700
     style UC09 fill:#FFB6C1
-    style UC09g fill:#DDA0DD
-    style UC09h fill:#DDA0DD
-    
-    Note3[Note: Future Feature - Not Implemented]
-    style Note3 fill:#FFFF99
 ```
+
+**Note:** Future Feature - Not Implemented
 
 ## U-FR10: Automated Abstract and Findings Summarization
 
@@ -356,14 +285,14 @@ graph TD
         UC10g[Show Study Strengths]
         UC10h[Show Study Limitations]
         
-        UC10 -.->|<<include>>| UC10a
-        UC10 -.->|<<include>>| UC10b
-        UC10 -.->|<<include>>| UC10c
-        UC10 -.->|<<include>>| UC10d
-        UC10 -.->|<<include>>| UC10e
-        UC10 -.->|<<include>>| UC10f
-        UC10 -.->|<<include>>| UC10g
-        UC10 -.->|<<include>>| UC10h
+        UC10 -.-> UC10a
+        UC10 -.-> UC10b
+        UC10 -.-> UC10c
+        UC10 -.-> UC10d
+        UC10 -.-> UC10e
+        UC10 -.-> UC10f
+        UC10 -.-> UC10g
+        UC10 -.-> UC10h
     end
     
     User -->|views| UC10
@@ -395,14 +324,13 @@ graph TD
         UC11g[Flag Missing Elements]
         UC11h[Provide Remediation Guidance]
         
-        UC11 -.->|<<include>>| UC11a
-        UC11 -.->|<<include>>| UC11b
-        UC11 -.->|<<include>>| UC11c
-        UC11 -.->|<<include>>| UC11d
-        UC11 -.->|<<include>>| UC11e
-        UC11 -.->|<<include>>| UC11f
-        UC11 -.->|<<include>>| UC11g
-        UC11h -.->|<<extend>>| UC11
+        UC11 -.-> UC11a
+        UC11 -.-> UC11b
+        UC11 -.-> UC11c
+        UC11 -.-> UC11d
+        UC11 -.-> UC11e
+        UC11 -.-> UC11f
+        UC11 -.-> UC11g
     end
     
     User -->|views| UC11
@@ -413,11 +341,9 @@ graph TD
     style System fill:#FFD700
     style OpenAI fill:#FFA500
     style UC11 fill:#FFB6C1
-    style UC11h fill:#DDA0DD
-    
-    Note4[Note: Future Feature - Not Implemented]
-    style Note4 fill:#FFFF99
 ```
+
+**Note:** Future Feature - Not Implemented
 
 ## U-FR12: Multi-Paper Comparative Dashboard
 
@@ -431,39 +357,19 @@ graph TD
         UC12[Use Multi-Paper Comparative Dashboard]
         UC12a[Display All Analyzed Papers]
         UC12b[Show Aggregate Statistics]
-        UC12c[Filter by Domain or Author]
-        UC12d[Sort by Quality Score]
-        UC12e[View Quality Trends Over Time]
-        UC12f[Compare Multiple Papers]
-        UC12g[Export Dashboard Data]
-        UC12h[Generate Visualizations]
         
-        UC12 -.->|<<include>>| UC12a
-        UC12 -.->|<<include>>| UC12b
-        UC12c -.->|<<extend>>| UC12
-        UC12d -.->|<<extend>>| UC12
-        UC12e -.->|<<extend>>| UC12
-        UC12f -.->|<<extend>>| UC12
-        UC12g -.->|<<extend>>| UC12
-        UC12h -.->|<<extend>>| UC12
+        UC12 -.-> UC12a
+        UC12 -.-> UC12b
     end
     
     User -->|accesses| UC12
     Firebase -->|retrieves| UC12a
     System -->|calculates| UC12b
-    User -->|exports| UC12g
     
     style User fill:#90EE90
     style System fill:#FFD700
     style Firebase fill:#FFA500
     style UC12 fill:#FFB6C1
-    style UC12c fill:#DDA0DD
-    style UC12d fill:#DDA0DD
-    style UC12e fill:#DDA0DD
-    style UC12f fill:#DDA0DD
-    style UC12g fill:#DDA0DD
-    style UC12h fill:#DDA0DD
-    
-    Note5[Note: Future Feature - Not Implemented]
-    style Note5 fill:#FFFF99
 ```
+
+**Note:** Future Feature - Not Implemented

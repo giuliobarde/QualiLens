@@ -6,7 +6,10 @@ graph TD
     Upload --> Validate{Valid PDF?}
     Validate -->|No| Error1[Display Error Message]
     Error1 --> End1([End])
-    Validate -->|Yes| CreateTemp[Create Temporary File]
+    Validate -->|Yes| ValidateMIME[Validate MIME Type & Size]
+    ValidateMIME -->|Invalid| ErrorMIME[Display Error: Invalid file type or size]
+    ErrorMIME --> End1
+    ValidateMIME -->|Valid| CreateTemp[Create Temporary File]
     CreateTemp --> ParsePDF[Parse PDF & Extract Text]
     ParsePDF --> ParseSuccess{Parsing Successful?}
     ParseSuccess -->|No| Error2[Return Parsing Error]

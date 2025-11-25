@@ -7,7 +7,6 @@ Description:
 Users must be able to upload research documents in PDF format or provide links to online repositories (e.g., PubMed, arXiv, SpringerLink, or institutional archives). The system will automatically validate the file format or URL, extract the full text, and convert it into a machine-readable format for further analysis.
 Functional Behavior:
 • Accepts drag-and-drop or file-selector uploads.
-• Validates MIME type and file size (≤25 MB per document).
 • For URLs, validates accessibility and file format.
 • Automatically parses uploaded files using a PDF parsing engine.
 • Provides user feedback on parsing progress and errors (e.g., corrupted files).
@@ -116,8 +115,9 @@ S-FR1 – PDF Parsing Engine
 Description:
 Implements text extraction and segmentation from uploaded or linked PDFs, supporting both machine-readable and scanned formats via OCR.
 Functional Behavior:
-• Parsing library integration: Use PyMuPDF (fitz) for primary extraction with fallback to pdfplumber for table detection. Handle encrypted PDFs using qpdf with user password prompts.
-• OCR pipeline: Apply Tesseract 5.x with LSTM models, using parallel processing (multiprocessing. Pool with N-2 cores). Implement confidence-based filtering (word confidence ≥60%, character confidence ≥70%).
+• File validation: Validate MIME type and file size (≤50 MB per document) before processing.
+• Parsing library integration: Use PyMuPDF (fitz) for primary extraction with fallback to pdfminer.six for text extraction and PyPDF2 as additional fallback. Handle encrypted PDFs using qpdf with user password prompts.
+• OCR pipeline: Apply Tesseract 5.x with LSTM models, using parallel processing (multiprocessing.Pool with N-2 cores). Implement confidence-based filtering (word confidence ≥60%, character confidence ≥70%).
 • Layout analysis: Deploy LayoutLM or DocLayNet models for document structure understanding, identifying headers, footers, columns, figures, tables, and body text with semantic roles.
 • Text normalization: Apply Unicode normalization (NFC), ligature expansion (fi → fi), hyphenation repair, and reference/citation extraction using GROBID or SciSpacy.
 • Performance: Process documents at ≥5 pages/second for machine-readable PDFs, ≥1 page/second for OCR requiring documents, on standard compute (4 vCPU, 16GB RAM).
@@ -126,11 +126,11 @@ S-FR2 – Metadata Extraction and Normalization
 Description:
 Extracts and standardizes metadata (authors, design, outcomes, etc.) using scientific ontologies (e.g., MeSH, UMLS).
 Functional Behavior:
-• NLP models: Deploy transformer-based sequence labeling models (BERT-CRF or SpanBERT) fine-tuned on CORD-19, PubMed, and biomedical datasets with F1 scores ≥0.88 for entity recognition.
-• Ontology integration: Implement UMLS Metathesaurus API integration with semantic type filtering (T061: Therapeutic Procedure, T121: Pharmacologic Substance). Use BioPortal REST API for MeSH and SNOMED lookups with caching (Redis, TTL: 7 days).
+• NLP models: Deploy transformer-based sequence labeling models (BERT-CRF or SpanBERT) fine-tuned on CORD-19, PubMed, and biomedical datasets with F1 scores ≥0.88 for entity recognition. Use OpenAI GPT-4o-mini via LangChain for metadata extraction and analysis.
+• Ontology integration: Implement UMLS Metathesaurus API integration with semantic type filtering (T061: Therapeutic Procedure, T121: Pharmacologic Substance). Use BioPortal REST API for MeSH and SNOMED lookups with caching (Firebase Firestore, TTL: 7 days).
 • Entity linking: Apply candidate generation → reranking pipeline using FAISS vector similarity search on entity embeddings (BioBERT-based, 768-dim) followed by context-aware disambiguation.
 • Validation rules: Enforce data type constraints (sample size: integer, p-value: 0≤x≤1), cross-field consistency checks (intervention type matches outcome type), and completeness scoring.
-• Storage schema: Persist as PostgreSQL JSONB with GIN indexing for fast querying, or MongoDB with JSON schema validation.
+• Storage schema: Persist as Firebase Firestore with document-based storage and indexing for fast querying.
  
 S-FR3 – Weighted Scoring Engine
 Description:
@@ -160,9 +160,10 @@ Functional Behavior:
   - Spin detection: RoBERTa-large fine-tuned on BMJ spin corpus (F1≥0.82)
   - P-hacking: Statistical pattern matching + XGBoost classifier on p-value distributions
   - Selective reporting: LSTM-based sequence model detecting outcome discrepancies
+  - LLM-based analysis: Use OpenAI GPT-4o-mini via LangChain for bias detection with structured prompting
 • Training data: Curate dataset from Cochrane risk-of-bias assessments, retraction databases (RetractionWatch), and manually annotated corpus (N≥5000 papers).
 • Feature engineering: Extract linguistic features (sentiment polarity, hedge words, certainty markers), statistical features (p-value patterns, effect size consistency), structural features (CONSORT item presence).
-• Calibration: Apply Platt scaling or temperature scaling for probability calibration. Validate on held-out test set with stratified sampling by domain.
+• Calibration: Apply Platt scaling or temperature scaling for probability calibration. Use temperature=0.0 for deterministic LLM outputs. Validate on held-out test set with stratified sampling by domain.
 • Output format: Return structured JSON with bias_type, confidence (0-1), evidence_spans (with coordinates), severity_level (Low/Medium/High/Critical).
  
 S-FR6 – Reproducibility Signal Detector
@@ -170,21 +171,21 @@ Description:
 Identifies reproducibility indicators such as open data, preregistration, and code availability.
 Functional Behavior:
 • Pattern matching: Use compiled regex patterns for URL detection (DOI: `10.\d{4,9}/[-._;()/:A-Z0-9]+`, GitHub: `github\.com/[\w-]+/[\w-]+`), with performance optimization (compiled patterns, backtracking limits).
-• URL validation: Implement asynchronous HTTP checking (aiohttp with connection pooling, max 20 concurrent connections) with timeout (5s) and retry logic. Cache validation results (Redis, TTL: 24h).
+• URL validation: Implement asynchronous HTTP checking (aiohttp with connection pooling, max 20 concurrent connections) with timeout (5s) and retry logic. Cache validation results (Firebase Firestore, TTL: 24h).
 • Repository analysis: For detected code repositories, use GitHub API to fetch metadata (last commit date, README presence, license type, star count) and assess completeness.
 • Scoring algorithm: Apply rubric-based scoring:
   - Raw data: 35 points (10: mentioned, 25: accessible, 35: validated)
   - Analysis code: 25 points (similar breakdown)
   - Protocol: 20 points
   - Preregistration: 20 points
-• Machine learning: Train gradient boosting model (LightGBM) to predict reproducibility from text features, achieving AUC≥0.87 on held-out test set.
+• Machine learning: Train gradient boosting model (LightGBM) to predict reproducibility from text features, achieving AUC≥0.87 on held-out test set. Use LLM-based analysis with structured scoring rubrics as complementary approach.
  
 S-FR7 – Rubric Configuration Manager
 Description:
 Implements storage, retrieval, and application of user-defined rubric configurations for scoring.
 Functional Behavior:
 • Schema validation: Use JSON Schema Draft-07 to enforce rubric structure with constraints: Σweights=1.0, 0≤weight≤1, required fields (dimension_name, criteria, weight).
-• Storage: Persist rubrics in PostgreSQL with JSONB type, enabling efficient querying and versioning. Implement row-level security (RLS) for multi-tenant isolation.
+• Storage: Persist rubrics in Firebase Firestore, enabling efficient querying and versioning. Implement security rules for multi-tenant isolation.
 • Versioning: Apply semantic versioning (MAJOR.MINOR.PATCH) with immutable version history. Store diffs using JSON Patch (RFC 6902) for space efficiency.
 • Live recalculation: Implement reactive programming pattern using RxJS or similar, debouncing weight changes (300ms) and triggering incremental recomputation of affected scores only.
 • Sharing mechanism: Generate shareable links with UUID-based access tokens, supporting permissions (view, clone, edit). Implement RBAC (Role-Based Access Control) for institutional rubrics.
@@ -193,11 +194,11 @@ S-FR8 – Evaluation Log and Version Tracker
 Description:
 Maintains evaluation history, linking analyses with model, rubric, and timestamp metadata.
 Functional Behavior:
-• Audit trail: Store immutable audit records in append-only log (PostgreSQL with INSERT-only policy or Apache Kafka for high throughput) containing: timestamp (ISO 8601), user_id, paper_id, model_version (semantic versioning), rubric_version, input_hash (SHA-256), output_hash, execution_time_ms.
+• Audit trail: Store immutable audit records in append-only log (Firebase Firestore with timestamp-based ordering) containing: timestamp (ISO 8601), user_id, paper_id, model_version (semantic versioning), rubric_version, input_hash (SHA-256), output_hash, execution_time_ms.
 • Metadata schema: Capture comprehensive provenance: Python/library versions, hardware specs (CPU model, RAM, GPU type), hyperparameters, random seeds for deterministic reproduction.
-• Query interface: Provide SQL views and REST API endpoints with filtering (date range, user, score threshold), sorting, and pagination (limit/offset or cursor-based).
+• Query interface: Provide Firebase Firestore queries and REST API endpoints with filtering (date range, user, score threshold), sorting, and pagination (limit/offset or cursor-based).
 • Re-evaluation engine: Implement containerized execution environment (Docker) preserving exact dependency versions, enabling byte-identical reproduction given same inputs.
-• Retention policy: Apply configurable retention (default: 5 years) with automated archival to cold storage (S3 Glacier) and GDPR-compliant deletion workflows.
+• Retention policy: Apply configurable retention (default: 5 years) with automated archival to cold storage (Firebase Storage or S3 Glacier) and GDPR-compliant deletion workflows.
  
 S-FR9 – Similarity and Benchmarking Engine
 Description:
@@ -207,16 +208,16 @@ Functional Behavior:
 • Vector search: Implement FAISS (Facebook AI Similarity Search) with HNSW (Hierarchical Navigable Small World) indexing for approximate nearest neighbor search with recall≥0.95 at k=10.
 • Similarity metrics: Compute cosine similarity for semantic comparison, Jaccard similarity for reference overlap, and Earth Mover's Distance for distribution matching (methodology type, sample size ranges).
 • Benchmarking statistics: Aggregate percentile rankings, mean/median/IQR statistics across corpus, stratified by: publication year (±2 years), journal impact factor quartile, medical subspecialty (MeSH hierarchy).
-• Caching strategy: Cache embedding computations in Redis with 30-day TTL, implement cache warming for popular query patterns.
+• Caching strategy: Cache embedding computations in Firebase Firestore with 30-day TTL, implement cache warming for popular query patterns.
  
 S-FR10 – Summarization Agent Module
 Description:
 Generates structured abstracts using fine-tuned summarization models integrated with the Analyzer Agent.
 Functional Behavior:
-• Model selection: Deploy BART-large or PEGASUS fine-tuned on PubMed and arXiv datasets, or domain-specific models like BioBART. Alternatively, use GPT-4 or Claude via API with structured prompting.
+• Model selection: Use gpt-4o-mini via API with structured prompting via LangChain.
 • Extraction pipeline: Apply extractive summarization first using TextRank or BERTSum to identify salient sentences, then abstractive refinement for coherence and conciseness.
 • Length control: Implement controllable generation with length tokens or beam search constraints: abstract (≤200 words), short summary (≤600 words), detailed summary (≤1500 words).
-• Structure enforcement: Use conditional generation with section headers (Objective, Methods, Results, Conclusions) and enforce guideline compliance (PRISMA, CONSORT) through constrained decoding.
+• Structure enforcement: Use conditional generation with section headers (Objective, Methods, Results, Conclusions) and enforce guideline compliance (PRISMA, CONSORT) through constrained decoding or structured prompting.
 • Quality assurance: Apply ROUGE, BERTScore, and factual consistency checking (using NLI models) with thresholds: ROUGE-L≥0.40, BERTScore≥0.85, NLI entailment≥0.70.
  
 S-FR11 – Ethics and Compliance Validator
@@ -233,10 +234,10 @@ S-FR12 – Multi-Paper Analytics Engine
 Description:
 Aggregates and visualizes multi-paper analysis data for portfolio-level insights.
 Functional Behavior:
-• Data aggregation: Implement OLAP cube or star schema in PostgreSQL/ClickHouse for efficient multi-dimensional analysis (paper × dimension × time × domain).
+• Data aggregation: Implement Pinecone for efficient multi-dimensional analysis (paper × dimension × time × domain).
 • Statistical computations: Calculate descriptive statistics (mean, median, SD, IQR), distribution fitting (normal, log-normal tests), correlation matrices (Pearson, Spearman) across quality dimensions.
 • Time-series analysis: Apply trend detection using LOESS regression or Seasonal-Trend decomposition (STL) to identify quality evolution over publication years.
-• Visualization APIs: Expose RESTful endpoints returning Plotly/D3.js-compatible JSON for heatmaps, scatter plots, box plots, violin plots, and parallel coordinates.
+• Visualization APIs: Expose RESTful endpoints returning Plotly/D3.js-compatible JSON for heatmaps, scatter plots, box plots, violin plots, and parallel coordinates. Frontend uses React 19 with Next.js 15.5.3, Tailwind CSS 4, and PDF.js 5.4.149 for PDF rendering.
 • Export formats: Support CSV, Excel (openpyxl), JSON, and Parquet for data science workflows. Implement streaming export for large datasets (>10K papers) using chunked responses.
 
 
@@ -364,7 +365,7 @@ The system must maintain responsive performance under varying load conditions an
 Functional Implications:
 • Response time: API endpoints respond in ≤500ms (median), ≤1s (95th percentile), ≤3s (99th percentile) under normal load (≤100 concurrent users). Analysis pipeline processes standard paper (20-30 pages) in ≤30 seconds.
 • Throughput: Support ≥50 analyses/minute sustained, ≥200 analyses/minute burst (5-minute window), using horizontal scaling (Kubernetes HPA) based on CPU (≥70%) and queue depth (≥50 jobs).
-• Scalability: Achieve linear scaling to ≥500 concurrent users through stateless architecture, distributed task queue (Celery + Redis/RabbitMQ), and database read replicas (≥2) with connection pooling (PgBouncer).
+• Scalability: Achieve linear scaling to ≥500 concurrent users through stateless architecture, distributed task queue (Celery + Redis/RabbitMQ or Firebase Cloud Tasks), and Firebase Firestore with automatic scaling and connection management.
 • Resource efficiency: Maintain CPU utilization ≤70% average, memory ≤80% average, with auto-scaling thresholds preventing resource exhaustion and OOM kills.
 Acceptance Criteria:
 • API response time: median ≤500ms, 95th percentile ≤1s.
@@ -377,7 +378,7 @@ The system must maintain high availability and recover gracefully from failures.
 Functional Implications:
 • Uptime: Achieve ≥99.5% availability (SLA: ≤3.6 hours downtime/month), measured through external monitoring (Pingdom, UptimeRobot) with 1-minute check intervals from ≥3 geographic locations.
 • Fault tolerance: Implement circuit breakers (Hystrix pattern) for external API calls (trip threshold: 50% errors in 10s window, timeout: 5s), retry logic with exponential backoff (max 3 attempts), and graceful degradation.
-• Disaster recovery: Maintain Recovery Time Objective (RTO) ≤4 hours, Recovery Point Objective (RPO) ≤1 hour through automated backups (PostgreSQL: hourly incremental, daily full; S3: versioning enabled) and multi-region replication.
+• Disaster recovery: Maintain Recovery Time Objective (RTO) ≤4 hours, Recovery Point Objective (RPO) ≤1 hour through automated backups (Firebase Firestore: automated daily backups; Firebase Storage or S3: versioning enabled) and multi-region replication.
 • Health checks: Implement liveness probes (HTTP /healthz endpoint, 5s timeout) and readiness probes (database connectivity, dependency checks) for orchestration platforms.
 Acceptance Criteria:
 • System uptime ≥99.5% measured over rolling 30-day period.
@@ -389,7 +390,7 @@ Description:
 The system must implement comprehensive security controls to protect sensitive research data and user information.
 Functional Implications:
 • Authentication: Implement OAuth 2.0 + OpenID Connect (Auth0, Keycloak), support MFA (TOTP, SMS, WebAuthn), enforce password policy (≥12 chars, complexity requirements, breach detection via HaveIBeenPwned API).
-• Authorization: Apply RBAC with roles (admin, reviewer, researcher, viewer), implement attribute-based access control (ABAC) for fine-grained permissions, and row-level security (RLS) in PostgreSQL for multi-tenancy.
+• Authorization: Apply RBAC with roles (admin, reviewer, researcher, viewer), implement attribute-based access control (ABAC) for fine-grained permissions, and security rules in Firebase Firestore for multi-tenancy.
 • Data protection: Encrypt at rest (AES-256-GCM), in transit (TLS 1.3, certificate pinning), implement secure session management (HTTP-only, Secure, SameSite cookies), and apply OWASP Top 10 mitigations.
 • Security testing: Conduct quarterly penetration testing, automated SAST (Snyk, SonarQube) in CI/CD, dependency vulnerability scanning (npm audit, Safety), and achieve ≥B grade in Mozilla Observatory.
 • Compliance: Log all security events (authentication, authorization failures, data access) to SIEM, maintain SOC 2 Type II compliance, and implement data loss prevention (DLP) policies.
@@ -433,7 +434,7 @@ The system must support deployment across different environments and cloud provi
 Functional Implications:
 • Containerization: Package all services as Docker images with multi-stage builds (optimize size <500MB for Python services, <200MB for Node services), vulnerability scanning (Trivy, Clair) in CI/CD, and semantic versioning.
 • Orchestration: Deploy on Kubernetes (≥1.25) with declarative manifests (Helm charts), implement GitOps (ArgoCD, Flux) for infrastructure-as-code, and support multiple environments (dev, staging, production) with namespace isolation.
-• Cloud-agnostic: Support deployment on AWS (EKS, RDS, S3), Azure (AKS, PostgreSQL, Blob Storage), and GCP (GKE, Cloud SQL, GCS) with minimal configuration changes using abstraction layers (Terraform modules).
+• Cloud-agnostic: Support deployment on AWS (EKS, S3), Azure (AKS, Blob Storage), and GCP (GKE, Cloud SQL, GCS) with Firebase Firestore as primary database, with minimal configuration changes using abstraction layers (Terraform modules).
 • CI/CD: Implement automated pipelines (GitHub Actions, GitLab CI) with stages: build → test → security scan → deploy, achieving deployment frequency ≥1/day, lead time <1 hour, and automated rollback on failure detection (<5 minutes).
 
 Acceptance Criteria:
