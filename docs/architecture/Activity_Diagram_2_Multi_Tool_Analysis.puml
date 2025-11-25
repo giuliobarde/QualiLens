@@ -1,0 +1,78 @@
+@startuml Activity_Diagram_2_Multi_Tool_Analysis_Pipeline
+title Activity Diagram 2: Multi-Tool Analysis Pipeline
+
+|#E6F3FF|Input Data|
+start
+:text_content: string
+pages_with_coords: list;
+
+|Paper Analysis Agent|
+:Initialize Evidence Collector;
+
+if (Already in async context?) then (yes)
+  :Execute sequential fallback strategy;
+  
+  |#FFF8DC|Phase 1: Independent Analysis|
+  :ContentSummarizerTool → GPT-4o-mini: Summarize;
+  :BiasDetectionTool → GPT-4o-mini: Detect biases;
+  :MethodologyAnalyzerTool;
+  |💾 SQLite Cache|
+  if (Score cached?) then (yes)
+    :Retrieve cached score;
+  else (no)
+    :GPT-4o-mini: Analyze methodology;
+    :Store score in cache;
+  endif
+  :StatisticalValidatorTool → GPT-4o-mini: Validate statistics;
+  :ResearchGapIdentifierTool → GPT-4o-mini: Identify gaps;
+  :CitationAnalyzerTool;
+  
+else (no)
+  :Execute async parallel strategy;
+  
+  fork
+    |#FFF8DC|Phase 1: Independent Analysis|
+    :ContentSummarizerTool → GPT-4o-mini: Summarize;
+    
+  fork again
+    :BiasDetectionTool → GPT-4o-mini: Detect biases;
+    
+  fork again
+    :MethodologyAnalyzerTool;
+    |💾 SQLite Cache|
+    if (Score cached?) then (yes)
+      :Retrieve cached score;
+    else (no)
+      :GPT-4o-mini: Analyze methodology;
+      :Store score in cache;
+    endif
+    
+  fork again
+    :StatisticalValidatorTool → GPT-4o-mini: Validate statistics;
+    
+  fork again
+    :ResearchGapIdentifierTool → GPT-4o-mini: Identify gaps;
+    
+  fork again
+    :CitationAnalyzerTool;
+    
+  end fork
+endif
+
+|Evidence Collector|
+:Collect evidence from all tools;
+
+|#FFE6CC|Phase 2: Reproducibility Assessment|
+:ReproducibilityAssessorTool → GPT-4o-mini: Analyze reproducibility;
+|Evidence Collector|
+:Collect evidence;
+
+|#E6FFE6|Phase 3: Quality Assessment|
+:QualityAssessorTool: Aggregate all tool results;
+
+|#E6F3FF|Analysis Results|
+:Return complete analysis results;
+
+stop
+
+@enduml

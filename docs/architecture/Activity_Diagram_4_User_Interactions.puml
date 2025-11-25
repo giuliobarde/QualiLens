@@ -1,0 +1,161 @@
+@startuml Activity_Diagram_4_User_Interaction_Flows
+title Activity Diagram 4: User Interaction Flows
+
+|User|
+|Frontend Event Handler|
+|Evidence Click Handler|
+|List Click Handler|
+|Tab Switch Handler|
+|Filter Handler|
+|Export Handler|
+|Clear Handler|
+
+start
+:Interface displayed;
+
+repeat
+  |User|
+  :Wait for user input;
+  
+  |Frontend Event Handler|
+  switch (User action type?)
+  
+  case (Click evidence in PDF)
+    |Evidence Click Handler|
+    :Get clicked evidence ID;
+    :Retrieve evidence item;
+    :Open modal dialog;
+    
+    repeat
+      :Display:
+      • Category badge
+      • Severity
+      • Page number
+      • Text snippet
+      • Rationale
+      • Score impact
+      • Coordinates;
+    repeat while (User closes modal?) is (no)
+    ->yes;
+    
+  case (Click evidence in list)
+    |List Click Handler|
+    :Get selected evidence ID;
+    :Find page number;
+    :Scroll PDF to page
+    and highlight;
+    :Open modal dialog;
+    
+    repeat
+      :Display evidence details;
+    repeat while (User closes modal?) is (no)
+    ->yes;
+    
+  case (Switch analysis tab)
+    |Tab Switch Handler|
+    :Update active tab state;
+    :Scroll to section;
+    :Display section content;
+    
+  case (Filter evidence)
+    |Filter Handler|
+    :Apply category filter:
+    • All
+    • Bias
+    • Methodology
+    • Reproducibility
+    • Statistics;
+    :Update evidence list;
+    :Update PDF highlights;
+    :Show filtered results;
+    
+  case (Export results)
+    |Export Handler|
+    :Serialize analysisResult
+    to JSON;
+    :Pretty-print with
+    2-space indent;
+    :Create Blob
+    (type: application/json);
+    :Generate filename:
+    qualilens-analysis-
+    YYYY-MM-DD.json;
+    :Create download link;
+    :Trigger browser download;
+    :Clean up object URL;
+    
+    stop
+    note right: File Downloaded
+    
+  case (Configure rubric)
+    |Rubric Configuration Handler|
+    :Open rubric configuration panel;
+    :Load current/default rubric;
+    :Display weights:
+    • Methodology (default: 60%)
+    • Bias (default: 20%)
+    • Reproducibility (default: 10%)
+    • Statistics (default: 10%);
+    
+    repeat
+      :User adjusts weights;
+      :Validate weights sum to 100%;
+      :Live recalculate scores;
+      :Update score display;
+    repeat while (User saves rubric?) is (no)
+    ->yes;
+    
+    :Save rubric configuration;
+    |Backend API|
+    :Store rubric in Firebase Firestore;
+    :Apply new rubric to current analysis;
+    :Recalculate all scores;
+    :Update UI with new scores;
+    
+  case (View evaluation history)
+    |Evaluation History Handler|
+    :Request history from backend;
+    |Backend API|
+    :Query Firebase Firestore;
+    :Return chronological list;
+    :Display history with filters:
+    • Date range
+    • Author/topic
+    • Score range
+    • Model version;
+    
+    if (User selects past evaluation?) then (yes)
+      :Load past analysis;
+      :Display historical results;
+      :Show version metadata:
+      • Model version
+      • Rubric version
+      • Analysis timestamp;
+      
+      if (User requests re-evaluation?) then (yes)
+        :Re-run with current models;
+        :Preserve historical version;
+        :Display comparison;
+      endif
+    endif
+    
+  case (Clear and reset)
+    |Clear Handler|
+    :Clear all state:
+    • Revoke URLs
+    • Clear files
+    • Reset analysis data;
+    :Reset interface;
+    
+    stop
+    note right: Interface Reset
+    
+  endswitch
+  
+repeat while (Continue interaction?) is (yes)
+->no;
+
+stop
+note right: Session Ended
+
+@enduml

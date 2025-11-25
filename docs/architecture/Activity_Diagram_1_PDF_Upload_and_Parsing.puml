@@ -1,0 +1,129 @@
+@startuml Activity_Diagram_1_PDF_Upload_and_Parsing
+title Activity Diagram 1: PDF Upload and Parsing
+
+|User|
+start
+:Select input method;
+
+|Frontend (Next.js)|
+:Receive user selection;
+
+if (Input method?) then (Upload file)
+  if (Valid file type?) then (yes)
+    if (File size ≤ 50MB?) then (yes)
+      :POST multipart/form-data;
+      
+      |Backend API (Flask)|
+      :Receive upload request;
+      
+      if (File present?) then (yes)
+        if (Valid PDF?) then (yes)
+          if (Size ≤ 50MB?) then (yes)
+            :Write to temporary file;
+            
+            |ParsePDFTool|
+            :Open PDF with PyMuPDF;
+            
+            if (Parse successful?) then (yes)
+              :Extract text from pages;
+            else (no)
+              :Try PDFMiner fallback;
+              if (Fallback successful?) then (yes)
+                :Extract text from pages;
+              else (no)
+                |Backend API (Flask)|
+                :Return 500: Parsing failed;
+                stop
+              endif
+            endif
+            
+            |ParsePDFTool|
+            :Extract metadata;
+            :Extract text block coordinates;
+            :Normalize coordinates 0-1;
+            :Build pages_with_coords;
+            :Return: text, metadata, pages, pages_with_coords;
+            
+            stop
+            
+          else (no)
+            :Return 400: File too large;
+            stop
+          endif
+        else (no)
+          :Return 400: Invalid file type;
+          stop
+        endif
+      else (no)
+        :Return 400: No file provided;
+        stop
+      endif
+      
+    else (no)
+      :Display error: File too large;
+      stop
+    endif
+  else (no)
+    :Display error: Only PDF supported;
+    stop
+  endif
+  
+else (Provide URL)
+  |Frontend (Next.js)|
+  :Validate URL format;
+  
+  if (Valid URL format?) then (yes)
+    :POST URL to backend;
+    
+    |Backend API (Flask)|
+    :Receive URL request;
+    
+    |LinkAnalyzerTool|
+    :Validate URL accessibility;
+    
+    if (URL accessible?) then (yes)
+      :Fetch PDF from URL;
+      
+      if (Fetch successful?) then (yes)
+        :Write to temporary file;
+        
+        |ParsePDFTool|
+        :Open PDF with PyMuPDF;
+        
+        if (Parse successful?) then (yes)
+          :Extract text from pages;
+        else (no)
+          :Try PDFMiner fallback;
+          if (Fallback successful?) then (yes)
+            :Extract text from pages;
+          else (no)
+            |Backend API (Flask)|
+            :Return 500: Parsing failed;
+            stop
+          endif
+        endif
+        
+        |ParsePDFTool|
+        :Extract metadata;
+        :Extract text block coordinates;
+        :Normalize coordinates 0-1;
+        :Build pages_with_coords;
+        :Return: text, metadata, pages, pages_with_coords;
+        
+        stop
+        
+      else (no)
+        :Return 400: Failed to fetch PDF;
+        stop
+      endif
+    else (no)
+      :Return 400: URL not accessible;
+      stop
+    endif
+  else (no)
+    :Display error: Invalid URL format;
+    stop
+  endif
+endif
+
+@enduml

@@ -1,0 +1,120 @@
+@startuml Activity_Diagram_3_Initial_Results_Rendering
+title Activity Diagram 3: Initial Results Rendering
+
+|Backend API|
+start
+:Serialize to JSON;
+:Send HTTP 200 response;
+
+|#E6F3FF|Network Transfer|
+:analysisResult: JSON
+(50-500 KB);
+
+|Frontend (React)|
+:Receive JSON response;
+
+if (Response.success?) then (yes)
+  :Process response:
+  Parse JSON & update state;
+  :Trigger React re-render;
+  
+  note right
+    FORK - Parallel Rendering
+  end note
+  
+  fork
+    |CircularScoreDisplay Component|
+    :Get overall_quality_score;
+    
+    if (Score range?) then (80-100)
+      :Render green circle;
+    elseif (60-79) then
+      :Render yellow circle;
+    else (0-59)
+      :Render red circle;
+    endif
+    
+    :Render component breakdown:
+    • Methodology 60%
+    • Bias 20%
+    • Reproducibility 10%
+    • Statistics 10%;
+    
+  fork again
+    |EnhancedPDFViewer Component|
+    :Load PDF with PDF.js;
+    
+    if (PDF type?) then (Object URL)
+      :Load from Object URL;
+    else (Base64)
+      :Convert Base64 to Blob;
+    endif
+    
+    :Render pages as canvas;
+    :Get evidence_traces;
+    :Map evidence to pages;
+    :Calculate absolute coordinates;
+    :Draw colored overlays:
+    • Bias
+    • Methodology
+    • Reproducibility
+    • Statistics;
+    :Add click handlers;
+    
+  fork again
+    |ScrollableAnalysisSections Component|
+    :Create 8 analysis tabs;
+    :Populate tab content:
+    • Summary
+    • Methodology
+    • Bias
+    • Statistics
+    • Reproducibility
+    • Gaps
+    • Citations
+    • Quality;
+    
+  fork again
+    |EvidenceVisualization Component|
+    :Get evidence_traces array;
+    :Group by category;
+    :Create filterable list;
+    :Add navigation handlers;
+    
+  fork again
+    |MetadataTable Component|
+    :Get extracted metadata;
+    :Display structured table:
+    • Study design
+    • Population/sample size
+    • Intervention type
+    • Endpoints
+    • Statistical tests
+    • Funding sources
+    • Conflicts of interest;
+    :Enable editing mode;
+    :Add export options (CSV/JSON);
+    
+  end fork
+  
+  note right
+    JOIN - Render Complete
+  end note
+  
+  |UI Display|
+  :Display complete interface;
+  
+  stop
+  note right
+    Ready for User Interaction
+  end note
+  
+else (no)
+  |Frontend (React)|
+  :Display error message;
+  
+  stop
+  note right: Display Error
+endif
+
+@enduml

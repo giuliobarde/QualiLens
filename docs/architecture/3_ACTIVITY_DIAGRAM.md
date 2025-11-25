@@ -3,7 +3,7 @@
 ## Activity Diagram 1: PDF Upload and Parsing
 
 ```mermaid
-graph TD
+graph LR
     Start([Start: User initiates upload])
     
     subgraph User["User"]
@@ -106,7 +106,7 @@ graph TD
 ## Activity Diagram 2: Multi-Tool Analysis Pipeline
 
 ```mermaid
-graph TD
+graph LR
     Start([Start: Text extracted])
     
     subgraph DataObjects["Input Data"]
@@ -236,7 +236,7 @@ graph TD
 ## Activity Diagram 3: Initial Results Rendering
 
 ```mermaid
-graph TD
+graph LR
     Start([Start: Backend returns results])
     
     subgraph Backend["Backend API"]
@@ -356,7 +356,7 @@ graph TD
 ## Activity Diagram 4: User Interaction Flows
 
 ```mermaid
-graph TD
+graph LR
     Start([Start: Interface displayed])
     
     subgraph User["User Actions"]
@@ -461,7 +461,7 @@ graph TD
 ## Activity Diagram 5: Evidence Collection and Scoring
 
 ```mermaid
-graph TD
+graph LR
     Start([Start: Analysis tool identifies finding])
     
     subgraph Tool["Analysis Tool"]
