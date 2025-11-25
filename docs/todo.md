@@ -1,0 +1,56 @@
+QualiLens - Implementation TODO List
+=====================================
+
+Generated: 2025-01-XX
+Last Updated: 2025-01-XX
+
+This document tracks features that are documented in use case diagrams but not yet fully implemented.
+
+U-FR4: Evidence Visualization
+-------------------------------
+- [ ] UC04e: Navigate to Evidence in PDF
+  - Description: When user clicks on evidence in the evidence list, the PDF viewer should automatically scroll/navigate to the page and location where that evidence was found
+  - Current Status: Evidence details modal shows page number, but PDF viewer doesn't automatically navigate to the location
+  - Priority: Medium
+  - Implementation Notes: Need to add scroll-to-page functionality in EnhancedPDFViewer component when evidence is selected
+
+- [ ] UC04f: Export Evidence Screenshot
+  - Description: Allow users to export a screenshot of the PDF with evidence highlights visible
+  - Current Status: Not implemented
+  - Priority: Low
+  - Implementation Notes: Could use html2canvas or similar library to capture PDF viewer canvas with highlights
+
+U-FR5: Bias Reporting Dashboard
+--------------------------------
+- [ ] UC05c: Show Bias Severity Levels
+  - Description: Prominently display bias severity levels (high, medium, low) in the bias analysis section UI
+  - Current Status: Severity data exists in evidence traces but is not prominently displayed in the bias section
+  - Priority: Medium
+  - Implementation Notes: Update ScrollableAnalysisSections bias rendering to show severity badges/indicators
+
+- [ ] UC05f: Provide Mitigation Suggestions
+  - Description: For each detected bias, provide suggestions on how to mitigate or address the bias
+  - Current Status: Not implemented
+  - Priority: Low
+  - Implementation Notes: Could extend BiasDetectionTool to generate mitigation suggestions using LLM
+
+U-FR6: Reproducibility Summary
+------------------------------
+- [ ] UC06d: Show Preregistration Status
+  - Description: Detect and display whether the study was preregistered (e.g., on ClinicalTrials.gov, OSF, etc.)
+  - Current Status: Not implemented
+  - Priority: Low
+  - Implementation Notes: Extend ReproducibilityAssessorTool to scan for preregistration mentions and links
+
+- [ ] UC06e: Display Supplementary Materials
+  - Description: Detect and display information about supplementary materials (datasets, code repositories, etc.)
+  - Current Status: Not implemented
+  - Priority: Low
+  - Implementation Notes: Extend ReproducibilityAssessorTool to identify supplementary material references
+
+- [ ] UC06h: Provide Direct Links
+  - Description: Make data availability, code availability, and supplementary materials clickable links when URLs are detected
+  - Current Status: Not implemented
+  - Priority: Low
+  - Implementation Notes: Parse URLs from reproducibility analysis results and render as clickable links in UI
+

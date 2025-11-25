@@ -10,14 +10,17 @@ graph TD
         UC01b[Validate File Type and Size]
         UC01c[Generate File Preview]
         UC01d[Send File to Backend]
+        UC01e[Drag and Drop File]
         
         UC01 -.->|<<include>>| UC01a
         UC01 -.->|<<include>>| UC01b
         UC01 -.->|<<include>>| UC01c
         UC01 -.->|<<include>>| UC01d
+        UC01a -.->|<<include>>| UC01e
     end
     
     User -->|uploads| UC01
+    User -->|drags and drops| UC01e
     
     style User fill:#90EE90
     style UC01 fill:#87CEEB
@@ -33,16 +36,14 @@ graph TD
     subgraph "QualiLens System"
         UC02[View Metadata Visualization]
         UC02a[Extract PDF Metadata]
-        UC02b[Display Structured Metadata Table]
-        UC02c[Show Study Design]
-        UC02d[Show Sample Characteristics]
-        UC02e[Show Statistical Tests Used]
+        UC02c[Show Study Design in Methodology Section]
+        UC02d[Show Sample Characteristics in Methodology Section]
+        UC02e[Show Statistical Tests Used in Statistics Section]
         
         UC02 -.->|<<include>>| UC02a
-        UC02 -.->|<<include>>| UC02b
-        UC02b -.->|<<include>>| UC02c
-        UC02b -.->|<<include>>| UC02d
-        UC02b -.->|<<include>>| UC02e
+        UC02 -.->|<<include>>| UC02c
+        UC02 -.->|<<include>>| UC02d
+        UC02 -.->|<<include>>| UC02e
     end
     
     User -->|views| UC02
@@ -183,21 +184,25 @@ graph TD
         UC06 -.->|<<include>>| UC06a
         UC06 -.->|<<include>>| UC06b
         UC06 -.->|<<include>>| UC06c
-        UC06 -.->|<<include>>| UC06d
-        UC06 -.->|<<include>>| UC06e
         UC06 -.->|<<include>>| UC06f
         UC06 -.->|<<include>>| UC06g
+        UC06d -.->|<<extend>>| UC06
+        UC06e -.->|<<extend>>| UC06
         UC06h -.->|<<extend>>| UC06
     end
     
     User -->|views| UC06
     System -->|analyzes| UC06a
-    User -->|clicks links| UC06h
     
     style User fill:#90EE90
     style System fill:#FFD700
     style UC06 fill:#87CEEB
-    style UC06h fill:#DDA0DD
+    style UC06d fill:#FFB6C1
+    style UC06e fill:#FFB6C1
+    style UC06h fill:#FFB6C1
+    
+    Note6a[Note: UC06d, UC06e, and UC06h - Future Features]
+    style Note6a fill:#FFFF99
 ```
 
 ## U-FR7: Rubric Customization
@@ -357,8 +362,8 @@ graph TD
         UC10 -.->|<<include>>| UC10d
         UC10 -.->|<<include>>| UC10e
         UC10 -.->|<<include>>| UC10f
-        UC10g -.->|<<extend>>| UC10
-        UC10h -.->|<<extend>>| UC10
+        UC10 -.->|<<include>>| UC10g
+        UC10 -.->|<<include>>| UC10h
     end
     
     User -->|views| UC10
@@ -369,8 +374,6 @@ graph TD
     style System fill:#FFD700
     style OpenAI fill:#FFA500
     style UC10 fill:#87CEEB
-    style UC10g fill:#DDA0DD
-    style UC10h fill:#DDA0DD
 ```
 
 ## U-FR11: Ethical and Compliance Validation
