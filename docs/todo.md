@@ -1,19 +1,12 @@
 QualiLens - Implementation TODO List
 =====================================
 
-Generated: 2025-01-XX
-Last Updated: 2025-01-XX
+
 
 This document tracks features that are documented in use case diagrams but not yet fully implemented.
 
 U-FR4: Evidence Visualization
 -------------------------------
-- [ ] UC04e: Navigate to Evidence in PDF
-  - Description: When user clicks on evidence in the evidence list, the PDF viewer should automatically scroll/navigate to the page and location where that evidence was found
-  - Current Status: Evidence details modal shows page number, but PDF viewer doesn't automatically navigate to the location
-  - Priority: Medium
-  - Implementation Notes: Need to add scroll-to-page functionality in EnhancedPDFViewer component when evidence is selected
-
 - [ ] UC04f: Export Evidence Screenshot
   - Description: Allow users to export a screenshot of the PDF with evidence highlights visible
   - Current Status: Not implemented

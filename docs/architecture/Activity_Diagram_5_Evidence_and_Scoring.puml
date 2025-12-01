@@ -1,83 +1,76 @@
 @startuml Activity_Diagram_5_Evidence_Collection_and_Scoring
 title Activity Diagram 5: Evidence Collection and Scoring
 
+|#E6F3FF|Analysis Tool|
 start
 
 repeat
-  partition "Analysis Tool" {
-  :Extract text snippet from paper
-  (max 500 chars);
-  :Create evidence metadata:
-  note right
-    • category
-    • rationale
-    • confidence
-    • severity
-  end note
-  :Call evidence_collector.add_evidence();
-  }
+:Extract text snippet from paper
+(max 500 chars);
+:Create evidence metadata:
+note right
+  • category
+  • rationale
+  • confidence
+  • severity
+end note
+
+|Evidence Collector|
+:Receive evidence from tool;
+
+if (Page number provided?) then (yes)
+  :Use provided page number;
+else (no)
+  :Normalize text snippet;
+  :Extract meaningful words
+  (length > 2);
   
-  partition "Evidence Collector" {
-  if (Page number provided?) then (yes)
-    :Use provided page number;
-  else (no)
-    partition "Page Number Detection" {
-    :Normalize text snippet;
-    :Extract meaningful words
-    (length > 2);
+  repeat
+    :For each page in pdf_pages;
+    :Calculate word overlap;
     
-    repeat
-      :For each page in pdf_pages;
-      :Calculate word overlap;
-      
-      if (Overlap ≥ 50%?) then (yes)
-        :Use detected page;
-        break
-      endif
-    repeat while (More pages?) is (yes)
-    ->no overlap found;
-    
-    :Default to page 1;
-    }
-  endif
-  
-  partition "Bounding Box Calculation" {
-  if (Bounding box provided?) then (yes)
-    :Use provided bounding box;
-  else (no)
-    :Calculate bounding box;
-    
-    if (Strategy 1:\nExact substring match?) then (yes)
-      :Use exact block coordinates;
-      
-    elseif (Strategy 2:\nFuzzy match ≥ 80%?) then (yes)
-      :Use fuzzy match coordinates;
-      
-    elseif (Strategy 3:\nPhrase match found?) then (yes)
-      :Use phrase match coordinates;
-      
-    else (no)
-      :Estimate bounding box;
-      note right
-        • x: 0.1
-        • y: 0.2 + offset
-        • width: 0.8
-        • height: estimated
-      end note
+    if (Overlap ≥ 50%?) then (yes)
+      :Use detected page;
+      break
     endif
-  endif
-  }
+  repeat while (More pages?) is (yes)
+  ->no overlap found;
   
-  partition "Evidence Storage" {
-  :Create and store EvidenceItem
-  with unique ID;
-  }
-  }
+  :Default to page 1;
+endif
+
+if (Bounding box provided?) then (yes)
+  :Use provided bounding box;
+else (no)
+  :Calculate bounding box;
+  
+  if (Strategy 1:\nExact substring match?) then (yes)
+    :Use exact block coordinates;
+    
+  elseif (Strategy 2:\nFuzzy match ≥ 80%?) then (yes)
+    :Use fuzzy match coordinates;
+    
+  elseif (Strategy 3:\nPhrase match found?) then (yes)
+    :Use phrase match coordinates;
+    
+  else (no)
+    :Estimate bounding box;
+    note right
+      • x: 0.1
+      • y: 0.2 + offset
+      • width: 0.8
+      • height: estimated
+    end note
+  endif
+endif
+
+:Create and store EvidenceItem
+with unique ID;
 
 repeat while (More findings from tools?) is (yes)
 ->no;
 
-partition "Evidence-Based Scoring" {
+|Evidence-Based Scorer|
 :Get all evidence items;
 :Group by category;
 note right
@@ -87,8 +80,8 @@ note right
   • statistics
 end note
 
-partition "Calculate Component Scores (Hierarchical)" {
-  :Calculate Methodology Score;
+fork
+  |#FFF8DC|Calculate Methodology Score|
   :Initialize base_methodology_score = 50;
   :For each sub-criterion (3-5);
   note right
@@ -105,7 +98,8 @@ partition "Calculate Component Scores (Hierarchical)" {
   from evidence items;
   :Clamp score to range 0-100;
   
-  :Calculate Bias Score;
+fork again
+  |#FFE6CC|Calculate Bias Score|
   :Initialize bias_score = 100;
   :For each sub-criterion (3-5);
   note right
@@ -122,7 +116,8 @@ partition "Calculate Component Scores (Hierarchical)" {
   (impact typically negative);
   :Clamp score to range 0-100;
   
-  :Calculate Reproducibility Score;
+fork again
+  |#E6FFE6|Calculate Reproducibility Score|
   :Initialize reproducibility_score = 50;
   :For each sub-criterion (3-5);
   note right
@@ -138,7 +133,8 @@ partition "Calculate Component Scores (Hierarchical)" {
   reproducibility evidence;
   :Clamp score to range 0-100;
   
-  :Calculate Statistics Score;
+fork again
+  |#E6F3FF|Calculate Statistics Score|
   :Initialize statistics_score = 50;
   :For each sub-criterion (3-5);
   note right
@@ -153,18 +149,17 @@ partition "Calculate Component Scores (Hierarchical)" {
   :Add/subtract score_impact
   from statistics evidence;
   :Clamp score to range 0-100;
-}
+  
+end fork
 
-partition "Percentile Normalization" {
+|Evidence-Based Scorer|
 :Load reference distribution
 (N≥1000 papers);
 :Stratify by domain and year;
 :Calculate percentile rankings;
 :Apply robust scaling (median, IQR);
 :Normalize component scores;
-}
 
-partition "Uncertainty Quantification" {
 :Bootstrap resampling (1000 iterations);
 :Propagate model uncertainty;
 :Calculate confidence intervals;
@@ -173,9 +168,7 @@ note right
   • 95% CI for final score
 end note
 :Compute uncertainty metrics;
-}
 
-partition "Explanation Generation" {
 :Generate NLG explanations;
 note right
   "Methodology score is {score}
@@ -184,7 +177,6 @@ note right
   Evidence: {citations}"
 end note
 :Create detailed breakdowns;
-}
 
 :Apply weighted formula;
 note right
@@ -211,11 +203,9 @@ note right
   • evidence_count
   • explanations
 end note
-}
 
-partition #E6F3FF "Scoring Results" {
+|#E6F3FF|Scoring Results|
 :Return scoring results;
-}
 
 stop
 

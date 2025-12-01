@@ -258,46 +258,6 @@ sequenceDiagram
     end
 ```
 
-## U-FR10: Automated Abstract and Findings Summarization
-
-```mermaid
-sequenceDiagram
-    participant User
-    participant Frontend as Frontend<br/>(Next.js)
-    participant Backend as Backend API<br/>(Flask)
-    participant Agent as Paper Analysis Agent
-    participant SummaryTool as ContentSummarizerTool
-    participant OpenAI as OpenAI API<br/>(GPT-4o-mini)
-
-    User->>Frontend: View automated summary
-    Frontend->>Frontend: Check if summary in results
-    alt Summary available
-        Frontend->>Frontend: Extract summary data
-        Frontend->>Frontend: Display executive summary
-        Frontend->>Frontend: Display key points
-        Frontend->>Frontend: Display methodology highlights
-        Frontend->>Frontend: Display main results
-        Frontend->>Frontend: Display implications
-        Frontend->>Frontend: Display strengths & limitations
-        Frontend-->>User: Show comprehensive summary
-    else No summary
-        Frontend->>Backend: Request analysis
-        Backend->>Agent: Process query
-        activate Agent
-        Agent->>SummaryTool: Generate summary
-        activate SummaryTool
-        SummaryTool->>OpenAI: Generate structured summary
-        OpenAI-->>SummaryTool: Summary response
-        SummaryTool-->>Agent: Summary data
-        deactivate SummaryTool
-        Agent-->>Backend: Analysis results
-        deactivate Agent
-        Backend-->>Frontend: JSON response
-        Frontend->>Frontend: Render summary sections
-        Frontend-->>User: Display automated summary
-    end
-```
-
 ## U-FR7: Rubric Customization
 
 ```mermaid
@@ -527,6 +487,46 @@ sequenceDiagram
         Backend-->>Frontend: JSON response (filtered benchmarks)
         deactivate Backend
         Frontend-->>User: Show filtered results
+    end
+```
+
+## U-FR10: Automated Abstract and Findings Summarization
+
+```mermaid
+sequenceDiagram
+    participant User
+    participant Frontend as Frontend<br/>(Next.js)
+    participant Backend as Backend API<br/>(Flask)
+    participant Agent as Paper Analysis Agent
+    participant SummaryTool as ContentSummarizerTool
+    participant OpenAI as OpenAI API<br/>(GPT-4o-mini)
+
+    User->>Frontend: View automated summary
+    Frontend->>Frontend: Check if summary in results
+    alt Summary available
+        Frontend->>Frontend: Extract summary data
+        Frontend->>Frontend: Display executive summary
+        Frontend->>Frontend: Display key points
+        Frontend->>Frontend: Display methodology highlights
+        Frontend->>Frontend: Display main results
+        Frontend->>Frontend: Display implications
+        Frontend->>Frontend: Display strengths & limitations
+        Frontend-->>User: Show comprehensive summary
+    else No summary
+        Frontend->>Backend: Request analysis
+        Backend->>Agent: Process query
+        activate Agent
+        Agent->>SummaryTool: Generate summary
+        activate SummaryTool
+        SummaryTool->>OpenAI: Generate structured summary
+        OpenAI-->>SummaryTool: Summary response
+        SummaryTool-->>Agent: Summary data
+        deactivate SummaryTool
+        Agent-->>Backend: Analysis results
+        deactivate Agent
+        Backend-->>Frontend: JSON response
+        Frontend->>Frontend: Render summary sections
+        Frontend-->>User: Display automated summary
     end
 ```
 

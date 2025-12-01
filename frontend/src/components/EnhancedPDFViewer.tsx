@@ -442,6 +442,39 @@ export default function EnhancedPDFViewer({
     }
   }, [currentPage, pdf, numPages, evidenceByPage, renderHighlights]);
 
+  // Navigate to page when evidence is selected
+  useEffect(() => {
+    if (!selectedEvidenceId || !pdf || numPages === 0 || evidenceTraces.length === 0) return;
+
+    const selectedEvidence = evidenceTraces.find(e => e.id === selectedEvidenceId);
+    if (selectedEvidence && selectedEvidence.page_number) {
+      const targetPage = selectedEvidence.page_number;
+      
+      // Validate page number is within bounds
+      if (targetPage >= 1 && targetPage <= numPages) {
+        console.log(`📍 Navigating to page ${targetPage} for evidence ${selectedEvidenceId}`);
+        
+        // Set current page to navigate to the evidence location
+        setCurrentPage(targetPage);
+        
+        // Ensure the page is rendered
+        if (!pageRenderingRef.current.has(targetPage)) {
+          renderPage(targetPage);
+        }
+        
+        // Scroll to the page container after a short delay to ensure rendering
+        setTimeout(() => {
+          if (containerRef.current) {
+            // Scroll the container to top to show the current page
+            containerRef.current.scrollTop = 0;
+          }
+        }, 200);
+      } else {
+        console.warn(`⚠️ Invalid page number ${targetPage} for evidence ${selectedEvidenceId} (valid range: 1-${numPages})`);
+      }
+    }
+  }, [selectedEvidenceId, pdf, numPages, evidenceTraces, renderPage]);
+
   // Handle evidence click on canvas
   const handleCanvasClick = (pageNum: number, event: React.MouseEvent<HTMLCanvasElement>) => {
     const canvas = highlightCanvasRefs.current.get(pageNum);
