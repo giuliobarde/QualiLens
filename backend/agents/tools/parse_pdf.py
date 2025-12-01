@@ -65,6 +65,14 @@ except Exception:
             self.examples = examples
             self.category = category
 
+# Layout analysis (optional, for S-FR1: Layout Analysis)
+try:
+    from .layout_analyzer import analyze_document_layout
+    _HAVE_LAYOUT_ANALYZER = True
+except Exception:
+    _HAVE_LAYOUT_ANALYZER = False
+    analyze_document_layout = None  # type: ignore
+
 logger = logging.getLogger(__name__)
 
 
@@ -1444,20 +1452,25 @@ class ParsePDFTool(BaseTool):
                         "type": "string",
                         "description": "Path to the PDF file to parse"
                     },
-                    "chunk_chars": {
-                        "type": "integer",
-                        "description": "Target characters per chunk (default: 4000)",
-                        "default": 4000
-                    },
-                    "overlap": {
-                        "type": "integer", 
-                        "description": "Overlap characters between chunks (default: 200)",
-                        "default": 200
-                    },
-                    "max_pages": {
-                        "type": "integer",
-                        "description": "Maximum number of pages to extract (optional)"
-                    }
+            "chunk_chars": {
+                "type": "integer",
+                "description": "Target characters per chunk (default: 4000)",
+                "default": 4000
+            },
+            "overlap": {
+                "type": "integer", 
+                "description": "Overlap characters between chunks (default: 200)",
+                "default": 200
+            },
+            "max_pages": {
+                "type": "integer",
+                "description": "Maximum number of pages to extract (optional)"
+            },
+            "enable_layout_analysis": {
+                "type": "boolean",
+                "description": "Enable layout analysis for semantic role identification (default: True)",
+                "default": True
+            }
                 }
             },
             examples=[
@@ -1474,6 +1487,7 @@ class ParsePDFTool(BaseTool):
         chunk_chars: int = 4000,
         overlap: int = 200,
         max_pages: Optional[int] = None,
+        enable_layout_analysis: bool = True,
     ) -> Dict[str, Any]:
         """
         Parse a PDF and return structured content for downstream LLM agents.
@@ -1496,6 +1510,25 @@ class ParsePDFTool(BaseTool):
         if max_pages is not None and max_pages > 0:
             pages = pages[:max_pages]
             pages_with_coords = pages_with_coords[:max_pages]
+
+        # S-FR1: Layout Analysis - Add semantic roles to text blocks
+        if enable_layout_analysis:
+            if _HAVE_LAYOUT_ANALYZER and analyze_document_layout:
+                try:
+                    logger.info("[Layout Analysis] Enabled - Performing semantic role identification")
+                    pages_with_coords = analyze_document_layout(
+                        pages_with_coords=pages_with_coords,
+                        pages_text=pages,
+                        use_ml_models=False  # Set to True if ML models are available
+                    )
+                    logger.info("[Layout Analysis] Successfully completed - semantic roles added to text blocks")
+                except Exception as e:
+                    logger.warning(f"[Layout Analysis] Failed, continuing without semantic roles: {e}")
+                    # Continue without layout analysis - backward compatible
+            else:
+                logger.warning("[Layout Analysis] Enabled but layout_analyzer module not available - skipping")
+        else:
+            logger.debug("[Layout Analysis] Disabled - skipping semantic role identification")
 
         full_text = "\n\n".join(p for p in pages if p)
         full_text = _normalize_text(full_text)

@@ -9,3 +9,6 @@ langchain-openai>=0.0.5
 python-dotenv==1.0.0
 pytesseract>=0.3.10
 Pillow>=10.0.0
+# Optional: For enhanced layout analysis with ML models (S-FR1)
+# transformers>=4.30.0  # Uncomment if using LayoutLM/DocLayNet models
+# torch>=2.0.0  # Uncomment if using ML models for layout analysis

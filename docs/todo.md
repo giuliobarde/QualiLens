@@ -7,18 +7,6 @@ This document tracks features that are documented in use case diagrams but not y
 
 FR1: PDF Parsing Engine Enhancements
 -------------------------------------
-- [ ] S-FR1: OCR Pipeline
-  - Description: Apply Tesseract 5.x with LSTM models for scanned PDFs, using parallel processing (multiprocessing.Pool with N-2 cores). Implement confidence-based filtering (word confidence ≥60%, character confidence ≥70%).
-  - Current Status: Basic PDF parsing exists, but OCR is not implemented
-  - Priority: Low
-  - Implementation Notes: Integrate Tesseract OCR into parse_pdf.py. Implement parallel processing and confidence filtering. Target performance: ≥1 page/second for OCR documents.
-
-- [ ] S-FR1: Layout Analysis
-  - Description: Deploy LayoutLM or DocLayNet models for document structure understanding, identifying headers, footers, columns, figures, tables, and body text with semantic roles.
-  - Current Status: Not implemented
-  - Priority: Low
-  - Implementation Notes: Integrate LayoutLM or DocLayNet models. Add semantic role identification to PDF parsing pipeline.
-
 - [ ] S-FR1: Advanced Text Normalization
   - Description: Apply Unicode normalization (NFC), ligature expansion, hyphenation repair, and reference/citation extraction using GROBID or SciSpacy.
   - Current Status: Basic text extraction exists, but advanced normalization is missing
