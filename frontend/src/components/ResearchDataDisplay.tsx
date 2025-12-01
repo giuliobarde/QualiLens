@@ -125,11 +125,128 @@ export default function ResearchDataDisplay({ data, detailedAnalysis, className 
     return authors.join(', ');
   };
 
+  // Helper function to escape CSV values
+  const escapeCsvValue = (value: any): string => {
+    if (value === null || value === undefined) return '';
+    const stringValue = String(value);
+    // If value contains comma, newline, or quote, wrap in quotes and escape quotes
+    if (stringValue.includes(',') || stringValue.includes('\n') || stringValue.includes('"')) {
+      return `"${stringValue.replace(/"/g, '""')}"`;
+    }
+    return stringValue;
+  };
+
+  // Helper function to flatten nested objects for CSV
+  const flattenObject = (obj: any, prefix = '', result: Record<string, any> = {}): Record<string, any> => {
+    for (const key in obj) {
+      if (obj.hasOwnProperty(key)) {
+        const newKey = prefix ? `${prefix}.${key}` : key;
+        const value = obj[key];
+        
+        if (value === null || value === undefined) {
+          result[newKey] = '';
+        } else if (Array.isArray(value)) {
+          // For arrays, join with semicolon for CSV
+          result[newKey] = value.map(item => 
+            typeof item === 'object' ? JSON.stringify(item) : String(item)
+          ).join('; ');
+        } else if (typeof value === 'object') {
+          flattenObject(value, newKey, result);
+        } else {
+          result[newKey] = value;
+        }
+      }
+    }
+    return result;
+  };
+
+  // Export to CSV
+  const exportToCSV = () => {
+    // Combine data and detailedAnalysis into a single object
+    const exportData = {
+      ...data,
+      detailed_analysis: detailedAnalysis || {}
+    };
+
+    // Flatten the object
+    const flattened = flattenObject(exportData);
+    
+    // Get all keys and sort them
+    const keys = Object.keys(flattened).sort();
+    
+    // Create CSV header
+    const header = keys.map(key => escapeCsvValue(key)).join(',');
+    
+    // Create CSV row
+    const row = keys.map(key => escapeCsvValue(flattened[key])).join(',');
+    
+    // Combine header and row
+    const csvContent = `${header}\n${row}`;
+    
+    // Create blob and download
+    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+    const link = document.createElement('a');
+    const url = URL.createObjectURL(blob);
+    link.setAttribute('href', url);
+    link.setAttribute('download', `research_metadata_${new Date().toISOString().split('T')[0]}.csv`);
+    link.style.visibility = 'hidden';
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+  };
+
+  // Export to JSON
+  const exportToJSON = () => {
+    const exportData = {
+      research_data: data,
+      detailed_analysis: detailedAnalysis || {}
+    };
+
+    const jsonContent = JSON.stringify(exportData, null, 2);
+    
+    // Create blob and download
+    const blob = new Blob([jsonContent], { type: 'application/json;charset=utf-8;' });
+    const link = document.createElement('a');
+    const url = URL.createObjectURL(blob);
+    link.setAttribute('href', url);
+    link.setAttribute('download', `research_metadata_${new Date().toISOString().split('T')[0]}.json`);
+    link.style.visibility = 'hidden';
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+  };
+
   return (
     <div className={`bg-white rounded-lg shadow-lg p-6 space-y-6 ${className}`}>
       <div className="border-b pb-4">
-        <h2 className="text-2xl font-bold text-gray-900 mb-2">Research Analysis Results</h2>
-        <p className="text-gray-600">Extracted key data from the research paper</p>
+        <div className="flex items-center justify-between">
+          <div>
+            <h2 className="text-2xl font-bold text-gray-900 mb-2">Research Analysis Results</h2>
+            <p className="text-gray-600">Extracted key data from the research paper</p>
+          </div>
+          <div className="flex gap-2">
+            <button
+              onClick={exportToCSV}
+              className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors duration-200 flex items-center gap-2 text-sm font-medium"
+              title="Export metadata as CSV"
+            >
+              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+              </svg>
+              Export CSV
+            </button>
+            <button
+              onClick={exportToJSON}
+              className="px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors duration-200 flex items-center gap-2 text-sm font-medium"
+              title="Export metadata as JSON"
+            >
+              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+              </svg>
+              Export JSON
+            </button>
+          </div>
+        </div>
       </div>
 
       {/* Basic Information */}

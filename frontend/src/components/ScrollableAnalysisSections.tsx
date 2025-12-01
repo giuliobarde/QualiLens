@@ -12,6 +12,98 @@ interface ScrollableAnalysisSectionsProps {
 export default function ScrollableAnalysisSections({ data, className = '' }: ScrollableAnalysisSectionsProps) {
   const [activeSection, setActiveSection] = useState('summary');
 
+  // Helper function to escape CSV values
+  const escapeCsvValue = (value: any): string => {
+    if (value === null || value === undefined) return '';
+    const stringValue = String(value);
+    // If value contains comma, newline, or quote, wrap in quotes and escape quotes
+    if (stringValue.includes(',') || stringValue.includes('\n') || stringValue.includes('"')) {
+      return `"${stringValue.replace(/"/g, '""')}"`;
+    }
+    return stringValue;
+  };
+
+  // Helper function to flatten nested objects for CSV
+  const flattenObject = (obj: any, prefix = '', result: Record<string, any> = {}): Record<string, any> => {
+    for (const key in obj) {
+      if (obj.hasOwnProperty(key)) {
+        const newKey = prefix ? `${prefix}.${key}` : key;
+        const value = obj[key];
+        
+        if (value === null || value === undefined) {
+          result[newKey] = '';
+        } else if (Array.isArray(value)) {
+          // For arrays, join with semicolon for CSV
+          result[newKey] = value.map(item => 
+            typeof item === 'object' ? JSON.stringify(item) : String(item)
+          ).join('; ');
+        } else if (typeof value === 'object') {
+          flattenObject(value, newKey, result);
+        } else {
+          result[newKey] = value;
+        }
+      }
+    }
+    return result;
+  };
+
+  // Export to CSV
+  const exportToCSV = () => {
+    if (!data) {
+      alert('No data available to export');
+      return;
+    }
+
+    // Flatten the data object
+    const flattened = flattenObject(data);
+    
+    // Get all keys and sort them
+    const keys = Object.keys(flattened).sort();
+    
+    // Create CSV header
+    const header = keys.map(key => escapeCsvValue(key)).join(',');
+    
+    // Create CSV row
+    const row = keys.map(key => escapeCsvValue(flattened[key])).join(',');
+    
+    // Combine header and row
+    const csvContent = `${header}\n${row}`;
+    
+    // Create blob and download
+    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+    const link = document.createElement('a');
+    const url = URL.createObjectURL(blob);
+    link.setAttribute('href', url);
+    link.setAttribute('download', `research_metadata_${new Date().toISOString().split('T')[0]}.csv`);
+    link.style.visibility = 'hidden';
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
+  };
+
+  // Export to JSON
+  const exportToJSON = () => {
+    if (!data) {
+      alert('No data available to export');
+      return;
+    }
+
+    const jsonContent = JSON.stringify(data, null, 2);
+    
+    // Create blob and download
+    const blob = new Blob([jsonContent], { type: 'application/json;charset=utf-8;' });
+    const link = document.createElement('a');
+    const url = URL.createObjectURL(blob);
+    link.setAttribute('href', url);
+    link.setAttribute('download', `research_metadata_${new Date().toISOString().split('T')[0]}.json`);
+    link.style.visibility = 'hidden';
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
+  };
+
   const sections = [
     { id: 'summary', label: 'Summary', icon: '📝', color: 'blue' },
     { id: 'methodology', label: 'Methodology', icon: '🔬', color: 'green' },
@@ -790,12 +882,36 @@ export default function ScrollableAnalysisSections({ data, className = '' }: Scr
     <div className={`flex flex-col h-full ${className}`}>
       {/* Enhanced Section Navigation */}
       <div className="bg-gradient-to-r from-gray-50 to-gray-100 border-b border-gray-200 p-4">
-        <h3 className="text-lg font-semibold text-gray-800 mb-4 flex items-center">
-          <svg className="w-5 h-5 mr-2 text-gray-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2" />
-          </svg>
-          Analysis Sections
-        </h3>
+        <div className="flex items-center justify-between mb-4">
+          <h3 className="text-lg font-semibold text-gray-800 flex items-center">
+            <svg className="w-5 h-5 mr-2 text-gray-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2" />
+            </svg>
+            Analysis Sections
+          </h3>
+          <div className="flex gap-2">
+            <button
+              onClick={exportToCSV}
+              className="px-3 py-1.5 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors duration-200 flex items-center gap-1.5 text-xs font-medium"
+              title="Export metadata as CSV"
+            >
+              <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+              </svg>
+              Export CSV
+            </button>
+            <button
+              onClick={exportToJSON}
+              className="px-3 py-1.5 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors duration-200 flex items-center gap-1.5 text-xs font-medium"
+              title="Export metadata as JSON"
+            >
+              <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+              </svg>
+              Export JSON
+            </button>
+          </div>
+        </div>
         <div className="grid grid-cols-2 gap-2">
           {sections.map((section) => (
             <button
