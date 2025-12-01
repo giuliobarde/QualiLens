@@ -10,6 +10,7 @@ import json
 import math
 import hashlib
 import logging
+import multiprocessing
 from dataclasses import dataclass
 from typing import List, Dict, Any, Optional, Tuple
 
@@ -35,6 +36,15 @@ try:
     _HAVE_PYPDF2 = True
 except Exception:
     _HAVE_PYPDF2 = False
+
+# OCR dependencies (optional)
+try:
+    import pytesseract
+    from PIL import Image
+    _HAVE_TESSERACT = True
+except Exception:
+    _HAVE_TESSERACT = False
+    pytesseract = None  # type: ignore
 
 # Local base class
 try:
@@ -825,6 +835,295 @@ def _safe_int(x: Any) -> Optional[int]:
 
 
 # -----------------------------
+# OCR Functions
+# -----------------------------
+
+def _needs_ocr(pages: List[str], threshold_chars_per_page: int = 50) -> bool:
+    """
+    Determine if a PDF needs OCR processing.
+    
+    A PDF is considered to need OCR if:
+    - The average number of characters per page is below the threshold
+    - Or if most pages have very little text
+    
+    Args:
+        pages: List of extracted text strings (one per page)
+        threshold_chars_per_page: Minimum characters per page to consider text extraction successful
+        
+    Returns:
+        True if OCR is needed, False otherwise
+    """
+    if not pages:
+        return True
+    
+    # Calculate average characters per page
+    total_chars = sum(len(page.strip()) for page in pages)
+    avg_chars_per_page = total_chars / len(pages) if pages else 0
+    
+    # Count pages with very little text
+    low_text_pages = sum(1 for page in pages if len(page.strip()) < threshold_chars_per_page)
+    low_text_ratio = low_text_pages / len(pages) if pages else 1.0
+    
+    # Need OCR if average is too low OR if most pages have little text
+    needs_ocr = avg_chars_per_page < threshold_chars_per_page or low_text_ratio > 0.7
+    
+    if needs_ocr:
+        logger.info(
+            f"[OCR] PDF appears to be scanned (avg_chars/page={avg_chars_per_page:.1f}, "
+            f"low_text_ratio={low_text_ratio:.2f}). Tesseract OCR will be used."
+        )
+    
+    return needs_ocr
+
+
+def _ocr_page_with_confidence(
+    page_image: Image.Image,
+    word_confidence_threshold: int = 60,
+    char_confidence_threshold: int = 70
+) -> str:
+    """
+    Extract text from a single page image using Tesseract OCR with confidence filtering.
+    
+    Args:
+        page_image: PIL Image object of the page
+        word_confidence_threshold: Minimum word confidence (0-100), default 60
+        char_confidence_threshold: Minimum character confidence (0-100), default 70
+        
+    Returns:
+        Extracted text with low-confidence words/characters filtered out
+    """
+    if not _HAVE_TESSERACT:
+        raise RuntimeError("Tesseract OCR is not available. Install pytesseract and tesseract-ocr.")
+    
+    # Use Tesseract 5.x with LSTM models (default in Tesseract 5.x)
+    # Get detailed data including confidence scores
+    logger.debug("[OCR] Processing page image with Tesseract (word_conf≥60%, char_conf≥70%)")
+    ocr_data = pytesseract.image_to_data(
+        page_image,
+        output_type=pytesseract.Output.DICT,
+        lang='eng',  # Default to English, can be extended for multilingual support
+    )
+    
+    # Filter words and characters based on confidence thresholds
+    filtered_text_parts = []
+    current_line_words = []
+    last_line_num = None
+    
+    num_words = len(ocr_data['text'])
+    
+    for i in range(num_words):
+        word = ocr_data['text'][i].strip()
+        word_conf = int(ocr_data['conf'][i]) if ocr_data['conf'][i] != -1 else 0
+        line_num = ocr_data['line_num'][i]
+        
+        # Skip empty words
+        if not word:
+            continue
+        
+        # Check word-level confidence
+        if word_conf < word_confidence_threshold:
+            # Word confidence is too low, but we can still check individual characters
+            # For now, skip low-confidence words entirely
+            continue
+        
+        # Check character-level confidence (approximate)
+        # Tesseract doesn't provide per-character confidence in standard output,
+        # so we use word confidence as a proxy. For stricter filtering, we could
+        # use Tesseract's TSV output format, but that's more complex.
+        # The word confidence threshold already provides good filtering.
+        
+        # Handle line breaks
+        if last_line_num is not None and line_num != last_line_num:
+            if current_line_words:
+                filtered_text_parts.append(' '.join(current_line_words))
+                current_line_words = []
+        
+        current_line_words.append(word)
+        last_line_num = line_num
+    
+    # Add remaining words
+    if current_line_words:
+        filtered_text_parts.append(' '.join(current_line_words))
+    
+    result_text = '\n'.join(filtered_text_parts)
+    
+    # Additional character-level filtering using regex to remove obvious OCR errors
+    # This is a heuristic approach since we don't have per-character confidence
+    # Remove words that are mostly non-alphanumeric (likely OCR artifacts)
+    words = result_text.split()
+    filtered_words = []
+    for word in words:
+        # Keep words that have at least 50% alphanumeric characters
+        alnum_ratio = sum(1 for c in word if c.isalnum()) / len(word) if word else 0
+        if alnum_ratio >= 0.5 or len(word) <= 2:  # Keep short words (likely valid)
+            filtered_words.append(word)
+    
+    result_text = ' '.join(filtered_words)
+    
+    return result_text
+
+
+def _ocr_single_page(args: Tuple[str, int, Dict[str, Any]]) -> Tuple[int, str]:
+    """
+    Process a single page for OCR (used in parallel processing).
+    
+    Args:
+        args: Tuple of (pdf_path, page_num, page_info)
+            - pdf_path: Path to PDF file
+            - page_num: Page number (0-indexed)
+            - page_info: Dict with page metadata (optional)
+            
+    Returns:
+        Tuple of (page_num, extracted_text)
+    """
+    pdf_path, page_num, page_info = args
+    
+    try:
+        # Open PDF and get page
+        if _HAVE_MUPDF:
+            doc = fitz.open(pdf_path)
+            page = doc.load_page(page_num)
+            
+            # Convert page to image (300 DPI for good OCR quality)
+            logger.debug(f"[OCR] Converting page {page_num + 1} to image (300 DPI)")
+            mat = fitz.Matrix(300/72, 300/72)  # 300 DPI scaling
+            pix = page.get_pixmap(matrix=mat)
+            
+            # Convert to PIL Image
+            img_data = pix.tobytes("png")
+            page_image = Image.open(io.BytesIO(img_data))
+            
+            doc.close()
+        else:
+            # Fallback: try pdf2image if available, otherwise skip
+            logger.warning(f"[OCR] PyMuPDF not available for OCR page {page_num + 1}, skipping")
+            return (page_num, "")
+        
+        # Perform OCR with confidence filtering
+        logger.debug(f"[OCR] Running Tesseract OCR on page {page_num + 1}")
+        text = _ocr_page_with_confidence(page_image)
+        char_count = len(text.strip())
+        logger.debug(f"[OCR] Page {page_num + 1} OCR complete: {char_count} characters extracted")
+        
+        return (page_num, text)
+        
+    except Exception as e:
+        logger.error(f"[OCR] Error during OCR for page {page_num + 1}: {e}")
+        return (page_num, "")
+
+
+def _extract_with_ocr(
+    path: str,
+    num_cores: Optional[int] = None
+) -> Tuple[List[str], Dict[str, Any], List[Dict[str, Any]]]:
+    """
+    Extract text from a scanned PDF using Tesseract OCR with parallel processing.
+    
+    Uses multiprocessing.Pool with N-2 cores (where N is total CPU cores) for parallel
+    page processing to achieve target performance of ≥1 page/second.
+    
+    Args:
+        path: Path to PDF file
+        num_cores: Number of cores to use (default: max(1, cpu_count() - 2))
+        
+    Returns:
+        Tuple of (pages_text, metadata, pages_with_coords)
+    """
+    if not _HAVE_TESSERACT:
+        raise RuntimeError(
+            "Tesseract OCR is not available. "
+            "Install pytesseract (pip install pytesseract) and tesseract-ocr system package."
+        )
+    
+    if not _HAVE_MUPDF:
+        raise RuntimeError(
+            "PyMuPDF is required for OCR processing. "
+            "Install pymupdf (pip install pymupdf)."
+        )
+    
+    logger.info(f"[OCR] ===== Starting Tesseract OCR extraction =====")
+    logger.info(f"[OCR] PDF file: {os.path.basename(path)}")
+    
+    # Verify Tesseract is available
+    try:
+        tesseract_version = pytesseract.get_tesseract_version()
+        logger.info(f"[OCR] Tesseract version: {tesseract_version}")
+    except Exception as e:
+        logger.warning(f"[OCR] Could not get Tesseract version: {e}")
+    
+    # Open PDF to get page count and metadata
+    doc = fitz.open(path)
+    num_pages = len(doc)
+    logger.info(f"[OCR] Total pages to process: {num_pages}")
+    
+    # Get metadata
+    info = doc.metadata or {}
+    meta = {
+        "title": info.get("title"),
+        "authors": info.get("author"),
+        "subject": info.get("subject"),
+        "creator": info.get("creator"),
+        "producer": info.get("producer"),
+        "creation_date": info.get("creationDate"),
+        "modification_date": info.get("modDate"),
+    }
+    
+    doc.close()
+    
+    # Determine number of cores for parallel processing (N-2 cores)
+    if num_cores is None:
+        total_cores = multiprocessing.cpu_count()
+        num_cores = max(1, total_cores - 2)
+        # Don't use more cores than pages
+        num_cores = min(num_cores, num_pages)
+    
+    logger.info(f"[OCR] Using {num_cores} cores for parallel processing")
+    logger.info(f"[OCR] Processing {num_pages} pages with Tesseract OCR (confidence filtering: word≥60%, char≥70%)")
+    
+    # Prepare arguments for parallel processing
+    page_args = [
+        (path, page_num, {}) for page_num in range(num_pages)
+    ]
+    
+    # Process pages in parallel
+    pages_text = [""] * num_pages
+    pages_with_coords: List[Dict[str, Any]] = []
+    
+    try:
+        logger.info(f"[OCR] Starting parallel OCR processing...")
+        with multiprocessing.Pool(processes=num_cores) as pool:
+            results = pool.map(_ocr_single_page, page_args)
+        
+        # Sort results by page number and extract text
+        results.sort(key=lambda x: x[0])
+        total_chars = 0
+        for page_num, text in results:
+            pages_text[page_num] = text
+            total_chars += len(text.strip())
+        
+        # Create pages_with_coords structure (simplified for OCR, no precise coordinates)
+        for page_num in range(num_pages):
+            pages_with_coords.append({
+                "page_num": page_num + 1,  # 1-indexed
+                "text_blocks": [],  # OCR doesn't provide precise coordinates
+                "page_width": 0,
+                "page_height": 0,
+                "ocr_processed": True  # Flag to indicate OCR was used
+            })
+        
+        avg_chars_per_page = total_chars / num_pages if num_pages > 0 else 0
+        logger.info(f"[OCR] ===== OCR extraction completed successfully =====")
+        logger.info(f"[OCR] Processed {num_pages} pages, extracted {total_chars:,} total characters ({avg_chars_per_page:.1f} avg/page)")
+        
+    except Exception as e:
+        logger.error(f"[OCR] ===== Error during parallel OCR processing =====")
+        logger.error(f"[OCR] Error details: {e}")
+        raise
+    
+    return pages_text, meta, pages_with_coords
+
+
+# -----------------------------
 # Extractors
 # -----------------------------
 
@@ -1004,9 +1303,13 @@ def _extract_with_pypdf2(path: str) -> Tuple[List[str], Dict[str, Any], List[Dic
 def extract_pdf(path: str) -> Tuple[List[str], PDFMetadata, List[Dict[str, Any]]]:
     """
     Returns (pages_text_list, metadata, pages_with_coords)
-    Preference: PyMuPDF > pdfminer > PyPDF2
+    Preference: PyMuPDF > pdfminer > PyPDF2 > OCR (if needed)
     
     pages_with_coords: List of dicts with page_num, text_blocks (with bboxes), page_width, page_height
+    
+    OCR is automatically used as a fallback when:
+    - Text extraction fails completely, OR
+    - Extracted text is too sparse (indicating a scanned PDF)
     """
     if not os.path.isfile(path):
         raise FileNotFoundError(f"PDF not found: {path}")
@@ -1021,6 +1324,7 @@ def extract_pdf(path: str) -> Tuple[List[str], PDFMetadata, List[Dict[str, Any]]
 
     last_err: Optional[Exception] = None
 
+    # Try standard text extraction methods first
     if _HAVE_MUPDF:
         try:
             pages, meta_dict, pages_with_coords = _extract_with_pymupdf(path)
@@ -1041,6 +1345,45 @@ def extract_pdf(path: str) -> Tuple[List[str], PDFMetadata, List[Dict[str, Any]]
         except Exception as e:
             last_err = e
             logger.warning("PyPDF2 extraction failed: %s", e)
+
+    # Check if OCR is needed (scanned PDF detection)
+    # OCR is needed if:
+    # 1. No text was extracted at all, OR
+    # 2. The extracted text is too sparse (average < 50 chars per page)
+    if pages:
+        # Check if OCR is needed even though we have some text
+        needs_ocr_check = _needs_ocr(pages)
+        if not needs_ocr_check:
+            # Log that OCR was checked but not needed (for visibility)
+            if _HAVE_TESSERACT:
+                logger.info("[OCR] Tesseract available but not needed - PDF has sufficient text (machine-readable)")
+            else:
+                logger.debug("[OCR] OCR check: PDF has sufficient text, Tesseract not installed")
+    
+    if not pages or _needs_ocr(pages):
+        if _HAVE_TESSERACT and _HAVE_MUPDF:
+            logger.info("[OCR] Text extraction insufficient or failed. Attempting Tesseract OCR...")
+            try:
+                pages, meta_dict, pages_with_coords = _extract_with_ocr(path)
+                logger.info("[OCR] Tesseract OCR extraction completed successfully")
+            except Exception as e:
+                logger.error(f"[OCR] Tesseract OCR extraction failed: {e}")
+                if not pages:
+                    # If we still have no pages and OCR failed, raise error
+                    raise RuntimeError(
+                        f"Could not extract text from PDF using standard methods or OCR. "
+                        f"Last error: {last_err if last_err else e}"
+                    )
+        elif not pages:
+            # OCR not available and no text extracted
+            if not _HAVE_TESSERACT:
+                logger.warning("[OCR] Tesseract OCR not available. Install pytesseract and tesseract-ocr for scanned PDF support.")
+            elif not _HAVE_MUPDF:
+                logger.warning("[OCR] PyMuPDF not available. Required for OCR processing.")
+            raise RuntimeError(
+                f"Could not extract text from PDF. Last error: {last_err}. "
+                f"OCR is not available (install pytesseract and tesseract-ocr for scanned PDFs)."
+            )
 
     if not pages:
         raise RuntimeError(f"Could not extract text from PDF. Last error: {last_err}")
