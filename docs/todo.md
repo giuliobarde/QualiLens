@@ -5,14 +5,6 @@ QualiLens - Implementation TODO List
 
 This document tracks features that are documented in use case diagrams but not yet fully implemented.
 
-U-FR4: Evidence Visualization
--------------------------------
-- [ ] UC04f: Export Evidence Screenshot
-  - Description: Allow users to export a screenshot of the PDF with evidence highlights visible
-  - Current Status: Not implemented
-  - Priority: Low
-  - Implementation Notes: Could use html2canvas or similar library to capture PDF viewer canvas with highlights
-
 U-FR5: Bias Reporting Dashboard
 --------------------------------
 - [ ] UC05c: Show Bias Severity Levels

@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState, useCallback, useMemo } from 'react';
 import * as pdfjsLib from 'pdfjs-dist';
+import { PDFDocument } from 'pdf-lib';
 
 // Configure PDF.js worker - use a stable known version from CDN or fallback to local
 if (typeof window !== 'undefined') {
@@ -74,7 +75,10 @@ export default function EnhancedPDFViewer({
   const [hoverPosition, setHoverPosition] = useState<{ x: number; y: number } | null>(null);
   const [showHighlights, setShowHighlights] = useState<boolean>(true); // Default: highlights visible
   const [enabledCategories, setEnabledCategories] = useState<Set<string>>(new Set(['bias', 'methodology', 'reproducibility', 'statistics', 'research_gap'])); // All categories enabled by default
+  const [showExportMenu, setShowExportMenu] = useState<boolean>(false);
+  const [isExporting, setIsExporting] = useState<boolean>(false);
   const pageRenderingRef = useRef<Set<number>>(new Set());
+  const exportMenuRef = useRef<HTMLDivElement>(null);
 
   // Filter evidence by enabled categories - use useMemo to prevent recreation on every render
   const filteredEvidence = useMemo(() => {
@@ -541,6 +545,225 @@ export default function EnhancedPDFViewer({
     canvas.style.cursor = foundEvidence ? 'pointer' : 'default';
   };
 
+  // Export screenshot of current page with evidence highlights
+  const exportCurrentPage = useCallback(() => {
+    const pdfCanvas = canvasRefs.current.get(currentPage);
+    const highlightCanvas = highlightCanvasRefs.current.get(currentPage);
+
+    if (!pdfCanvas) {
+      console.warn('No PDF canvas found for current page');
+      return;
+    }
+
+    try {
+      // Create a new canvas to combine both layers
+      const combinedCanvas = document.createElement('canvas');
+      combinedCanvas.width = pdfCanvas.width;
+      combinedCanvas.height = pdfCanvas.height;
+      const ctx = combinedCanvas.getContext('2d');
+
+      if (!ctx) {
+        console.error('Failed to get 2D context for combined canvas');
+        return;
+      }
+
+      // Draw PDF canvas first (background)
+      ctx.drawImage(pdfCanvas, 0, 0);
+
+      // Draw highlight canvas on top if it exists and highlights are enabled
+      if (highlightCanvas && showHighlights && highlightCanvas.width > 0 && highlightCanvas.height > 0) {
+        ctx.drawImage(highlightCanvas, 0, 0);
+      }
+
+      // Convert to blob and download
+      combinedCanvas.toBlob((blob) => {
+        if (!blob) {
+          console.error('Failed to create blob from canvas');
+          return;
+        }
+
+        const url = URL.createObjectURL(blob);
+        const link = document.createElement('a');
+        const timestamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, -5);
+        const pageSuffix = numPages > 1 ? `_page-${currentPage}` : '';
+        const downloadFileName = fileName 
+          ? `${fileName.replace(/\.pdf$/i, '')}${pageSuffix}_evidence-${timestamp}.png`
+          : `document${pageSuffix}_evidence-${timestamp}.png`;
+        
+        link.href = url;
+        link.download = downloadFileName;
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+        URL.revokeObjectURL(url);
+
+        console.log(`✅ Screenshot exported: ${downloadFileName}`);
+      }, 'image/png');
+    } catch (error) {
+      console.error('Error exporting screenshot:', error);
+    }
+  }, [currentPage, showHighlights, numPages, fileName]);
+
+  // Export all pages with evidence highlights
+  const exportAllPages = useCallback(async () => {
+    if (!pdf || numPages === 0) {
+      console.warn('PDF not loaded or no pages available');
+      return;
+    }
+
+    setIsExporting(true);
+    setShowExportMenu(false);
+
+    try {
+      // First, ensure all pages are rendered
+      const pagesToRender: number[] = [];
+      for (let pageNum = 1; pageNum <= numPages; pageNum++) {
+        const pdfCanvas = canvasRefs.current.get(pageNum);
+        if (!pdfCanvas || pdfCanvas.width === 0) {
+          pagesToRender.push(pageNum);
+        }
+      }
+
+      // Render missing pages
+      if (pagesToRender.length > 0) {
+        console.log(`Rendering ${pagesToRender.length} missing pages before export...`);
+        for (const pageNum of pagesToRender) {
+          await renderPage(pageNum);
+          // Wait for canvas to be ready and highlights to render
+          await new Promise(resolve => setTimeout(resolve, 300));
+          
+          // Ensure highlights are rendered
+          const pdfCanvas = canvasRefs.current.get(pageNum);
+          if (pdfCanvas && pdfCanvas.width > 0) {
+            renderHighlights(pageNum, pdfCanvas.width, pdfCanvas.height);
+            await new Promise(resolve => setTimeout(resolve, 100));
+          }
+        }
+      }
+
+      // Ensure highlights are rendered for all pages (including already rendered ones)
+      console.log('Ensuring highlights are rendered for all pages...');
+      for (let pageNum = 1; pageNum <= numPages; pageNum++) {
+        const pdfCanvas = canvasRefs.current.get(pageNum);
+        if (pdfCanvas && pdfCanvas.width > 0) {
+          renderHighlights(pageNum, pdfCanvas.width, pdfCanvas.height);
+        }
+      }
+      // Wait for all highlights to render
+      await new Promise(resolve => setTimeout(resolve, 200));
+
+      // Create a new PDF document
+      const pdfDoc = await PDFDocument.create();
+
+      // Process each page and add it to the PDF
+      for (let pageNum = 1; pageNum <= numPages; pageNum++) {
+        const pdfCanvas = canvasRefs.current.get(pageNum);
+        const highlightCanvas = highlightCanvasRefs.current.get(pageNum);
+
+        if (!pdfCanvas || pdfCanvas.width === 0) {
+          console.warn(`Page ${pageNum} not rendered, skipping...`);
+          continue;
+        }
+
+        // Get the original PDF page to get correct dimensions in points
+        const pdfPage = await pdf.getPage(pageNum);
+        const originalViewport = pdfPage.getViewport({ scale: 1.0 }); // Get unscaled viewport for original dimensions
+        
+        // Create combined canvas for this page
+        const pageCanvas = document.createElement('canvas');
+        pageCanvas.width = pdfCanvas.width;
+        pageCanvas.height = pdfCanvas.height;
+        const ctx = pageCanvas.getContext('2d');
+
+        if (!ctx) {
+          console.warn(`Failed to get context for page ${pageNum}`);
+          continue;
+        }
+
+        // Draw PDF canvas
+        ctx.drawImage(pdfCanvas, 0, 0);
+
+        // Draw highlight canvas if enabled
+        if (highlightCanvas && showHighlights && highlightCanvas.width > 0 && highlightCanvas.height > 0) {
+          ctx.drawImage(highlightCanvas, 0, 0);
+        }
+
+        // Convert canvas to PNG image data
+        const imageDataUrl = pageCanvas.toDataURL('image/png');
+        const imageBytes = await fetch(imageDataUrl).then(res => res.arrayBuffer());
+        
+        // Embed the image in the PDF
+        const image = await pdfDoc.embedPng(imageBytes);
+        
+        // Use the original viewport dimensions (already in points)
+        // The canvas is scaled, but we want the PDF page to match the original PDF size
+        const pdfWidth = originalViewport.width;
+        const pdfHeight = originalViewport.height;
+        
+        // Add a new page with the image
+        // Scale the image to fit the PDF page dimensions
+        const page = pdfDoc.addPage([pdfWidth, pdfHeight]);
+        page.drawImage(image, {
+          x: 0,
+          y: 0,
+          width: pdfWidth,
+          height: pdfHeight,
+        });
+
+        console.log(`✅ Added page ${pageNum} to PDF (${pdfWidth}x${pdfHeight} points)`);
+      }
+
+      // Save the PDF
+      const pdfBytes = await pdfDoc.save();
+      
+      // Create blob and download
+      const blob = new Blob([pdfBytes], { type: 'application/pdf' });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      const timestamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, -5);
+      const downloadFileName = fileName 
+        ? `${fileName.replace(/\.pdf$/i, '')}_evidence-${timestamp}.pdf`
+        : `document_evidence-${timestamp}.pdf`;
+      
+      link.href = url;
+      link.download = downloadFileName;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      URL.revokeObjectURL(url);
+
+      console.log(`✅ PDF with ${numPages} pages exported: ${downloadFileName}`);
+      setIsExporting(false);
+    } catch (error) {
+      console.error('Error exporting all pages:', error);
+      setIsExporting(false);
+    }
+  }, [pdf, numPages, showHighlights, fileName, renderPage]);
+
+  // Handle export option selection
+  const handleExportOption = useCallback((option: 'current' | 'all') => {
+    if (option === 'current') {
+      exportCurrentPage();
+      setShowExportMenu(false);
+    } else {
+      exportAllPages();
+    }
+  }, [exportCurrentPage, exportAllPages]);
+
+  // Close export menu when clicking outside
+  useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+      if (exportMenuRef.current && !exportMenuRef.current.contains(event.target as Node)) {
+        setShowExportMenu(false);
+      }
+    };
+
+    if (showExportMenu) {
+      document.addEventListener('mousedown', handleClickOutside);
+      return () => document.removeEventListener('mousedown', handleClickOutside);
+    }
+  }, [showExportMenu]);
+
   if (!pdfUrl) {
     return (
       <div className="flex items-center justify-center h-full bg-gray-50">
@@ -625,6 +848,60 @@ export default function EnhancedPDFViewer({
               />
               <span className="text-sm text-gray-700 font-medium">Show Highlights</span>
             </label>
+          )}
+          
+          {/* Export Screenshot Button with Dropdown */}
+          {filteredEvidence.length > 0 && (
+            <div className="relative" ref={exportMenuRef}>
+              <button
+                onClick={() => setShowExportMenu(!showExportMenu)}
+                disabled={isExporting}
+                className="inline-flex items-center space-x-2 px-3 py-1.5 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-all text-sm font-medium disabled:opacity-50 disabled:cursor-not-allowed"
+                title="Export screenshot with evidence highlights"
+              >
+                {isExporting ? (
+                  <>
+                    <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white"></div>
+                    <span>Exporting...</span>
+                  </>
+                ) : (
+                  <>
+                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" />
+                    </svg>
+                    <span>Export Screenshot</span>
+                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+                    </svg>
+                  </>
+                )}
+              </button>
+              
+              {showExportMenu && !isExporting && (
+                <div className="absolute right-0 mt-2 w-56 bg-white rounded-lg shadow-lg border border-gray-200 z-50">
+                  <div className="py-1">
+                    <button
+                      onClick={() => handleExportOption('current')}
+                      className="w-full text-left px-4 py-2 text-sm text-gray-700 hover:bg-gray-100 flex items-center space-x-2"
+                    >
+                      <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                      </svg>
+                      <span>Current Page</span>
+                    </button>
+                    <button
+                      onClick={() => handleExportOption('all')}
+                      className="w-full text-left px-4 py-2 text-sm text-gray-700 hover:bg-gray-100 flex items-center space-x-2"
+                    >
+                      <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2V6zM14 6a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2V6zM4 16a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2v-2zM14 16a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2v-2z" />
+                      </svg>
+                      <span>All Pages</span>
+                    </button>
+                  </div>
+                </div>
+              )}
+            </div>
           )}
           
           <div className="flex items-center space-x-2 border-l border-gray-300 pl-4">
