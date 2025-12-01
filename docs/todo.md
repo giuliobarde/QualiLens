@@ -198,14 +198,8 @@ FR9: Literature Benchmarking and Similarity Analysis
   - Implementation Notes: Implement embedding generation using SciNCL or SPECTER2 (768-dim). Integrate FAISS with HNSW indexing (recall≥0.95 at k=10). Compute similarity metrics (cosine, Jaccard, Earth Mover's Distance). Aggregate benchmarking statistics with stratification. Implement caching in Firebase Firestore (30-day TTL).
 
 FR10: Automated Abstract and Findings Summarization
-------------------------------------------------------
-- [ ] U-FR10: Structured Summarization
-  - Description: Generate AI-powered structured summaries following PRISMA/CONSORT-style reporting formats with concise (≤200 words) and extended (≤600 words) versions.
-  - Current Status: ContentSummarizerTool exists but lacks structured formats
-  - Priority: Low
-  - Implementation Notes: Extend ContentSummarizerTool to enforce PRISMA/CONSORT structure. Implement length control for different summary versions. Add one-click inclusion in reports/exports.
-
-- [ ] S-FR10: Extractive Summarization Pipeline
+------------------------------------------------------- 
+[ ] S-FR10: Extractive Summarization Pipeline
   - Description: Apply extractive summarization first using TextRank or BERTSum to identify salient sentences, then abstractive refinement for coherence and conciseness.
   - Current Status: ContentSummarizerTool exists, but extractive pipeline is missing
   - Priority: Low
