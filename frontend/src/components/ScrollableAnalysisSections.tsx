@@ -809,53 +809,145 @@ export default function ScrollableAnalysisSections({ data, className = '' }: Scr
     </ErrorBoundary>
   );
 
-  const renderCitations = () => (
-    <ErrorBoundary>
-      <div className="space-y-4">
-        <div className="grid grid-cols-2 gap-3">
-          <div className="bg-blue-50 p-3 rounded text-center">
-            <div className="text-lg font-bold text-blue-600">{data?.total_citations || 0}</div>
-            <div className="text-xs text-blue-600">Total Citations</div>
-          </div>
-          <div className="bg-green-50 p-3 rounded text-center">
-            <div className="text-lg font-bold text-green-600">
-              {data?.citation_quality ? 'High' : 'Unknown'}
+  const renderCitations = () => {
+    // Get citations from various possible locations
+    const extractedCitations = 
+      data?.citation_analysis?.extracted_citations || 
+      data?.extracted_citations || 
+      [];
+    
+    const totalCitations = data?.total_citations || 
+      data?.citation_analysis?.total_citations || 
+      extractedCitations.length || 
+      0;
+
+    return (
+      <ErrorBoundary>
+        <div className="space-y-4">
+          <div className="grid grid-cols-2 gap-3">
+            <div className="bg-blue-50 p-3 rounded text-center">
+              <div className="text-lg font-bold text-blue-600">{totalCitations}</div>
+              <div className="text-xs text-blue-600">Total Citations</div>
             </div>
-            <div className="text-xs text-green-600">Quality</div>
-          </div>
-        </div>
-        
-        {data?.citation_gaps && Array.isArray(data.citation_gaps) && data.citation_gaps.length > 0 && (
-          <div>
-            <h4 className="font-semibold text-red-800 mb-2">Citation Gaps ({data.citation_gaps.length})</h4>
-            <div className="space-y-2">
-              {data.citation_gaps.slice(0, 3).map((gap: any, index: number) => (
-                <div key={index} className="bg-red-50 p-3 rounded border border-red-200">
-                  <SafeRenderer data={gap} className="text-sm text-red-700" />
-                </div>
-              ))}
+            <div className="bg-green-50 p-3 rounded text-center">
+              <div className="text-lg font-bold text-green-600">
+                {data?.citation_quality || data?.citation_analysis?.citation_quality ? 'High' : 'Unknown'}
+              </div>
+              <div className="text-xs text-green-600">Quality</div>
             </div>
           </div>
-        )}
-        
-        {data?.bibliometric_indicators && (
-          <div>
-            <h4 className="font-semibold text-gray-800 mb-2">Bibliometric Indicators</h4>
-            <div className="grid grid-cols-2 gap-2">
-              {Object.entries(data.bibliometric_indicators).slice(0, 4).map(([key, value]) => (
-                <div key={key} className="bg-gray-50 p-2 rounded text-center">
-                  <div className="text-sm font-semibold text-gray-800">
-                    <SafeRenderer data={value} />
+          
+          {/* Citations List */}
+          {extractedCitations && Array.isArray(extractedCitations) && extractedCitations.length > 0 && (
+            <div>
+              <h4 className="font-semibold text-gray-800 mb-3">All Citations ({extractedCitations.length})</h4>
+              <div className="max-h-96 overflow-y-auto space-y-3 pr-2">
+                {extractedCitations.map((citation: any, index: number) => (
+                  <div 
+                    key={citation.citation_number || index} 
+                    className="bg-white p-4 rounded-lg border border-gray-200 shadow-sm hover:shadow-md transition-shadow"
+                  >
+                    <div className="flex items-start gap-3">
+                      <div className="flex-shrink-0 w-8 h-8 bg-pink-100 rounded-full flex items-center justify-center text-pink-600 font-semibold text-sm">
+                        {citation.citation_number || index + 1}
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        {/* Authors */}
+                        {citation.authors && citation.authors.length > 0 && (
+                          <div className="mb-1">
+                            <span className="text-sm font-semibold text-gray-700">
+                              {citation.authors.slice(0, 3).join(', ')}
+                              {citation.authors.length > 3 && ` et al.`}
+                            </span>
+                          </div>
+                        )}
+                        
+                        {/* Title */}
+                        {citation.title && (
+                          <div className="mb-1">
+                            <span className="text-sm font-medium text-gray-800 italic">
+                              {citation.title.length > 150 ? `${citation.title.substring(0, 150)}...` : citation.title}
+                            </span>
+                          </div>
+                        )}
+                        
+                        {/* Journal/Book Title */}
+                        {(citation.journal || citation.book_title) && (
+                          <div className="mb-1">
+                            <span className="text-sm text-gray-600">
+                              {citation.journal || citation.book_title}
+                              {citation.volume && `, Vol. ${citation.volume}`}
+                              {citation.issue && `, No. ${citation.issue}`}
+                            </span>
+                          </div>
+                        )}
+                        
+                        {/* Year, Pages, DOI */}
+                        <div className="flex flex-wrap gap-2 text-xs text-gray-500 mt-1">
+                          {citation.year && (
+                            <span className="bg-gray-100 px-2 py-0.5 rounded">{citation.year}</span>
+                          )}
+                          {citation.pages && (
+                            <span className="bg-gray-100 px-2 py-0.5 rounded">pp. {citation.pages}</span>
+                          )}
+                          {citation.doi && (
+                            <span className="bg-blue-100 px-2 py-0.5 rounded text-blue-700">
+                              DOI: {citation.doi.length > 30 ? `${citation.doi.substring(0, 30)}...` : citation.doi}
+                            </span>
+                          )}
+                          {citation.citation_style && (
+                            <span className="bg-purple-100 px-2 py-0.5 rounded text-purple-700">
+                              {citation.citation_style}
+                            </span>
+                          )}
+                        </div>
+                        
+                        {/* Raw citation as fallback if structured data is minimal */}
+                        {(!citation.title && !citation.authors?.length) && citation.raw && (
+                          <div className="mt-2 text-xs text-gray-600 italic">
+                            {citation.raw.length > 200 ? `${citation.raw.substring(0, 200)}...` : citation.raw}
+                          </div>
+                        )}
+                      </div>
+                    </div>
                   </div>
-                  <div className="text-xs text-gray-600 capitalize">{key.replace('_', ' ')}</div>
-                </div>
-              ))}
+                ))}
+              </div>
             </div>
-          </div>
-        )}
-      </div>
-    </ErrorBoundary>
-  );
+          )}
+          
+          {data?.citation_gaps && Array.isArray(data.citation_gaps) && data.citation_gaps.length > 0 && (
+            <div>
+              <h4 className="font-semibold text-red-800 mb-2">Citation Gaps ({data.citation_gaps.length})</h4>
+              <div className="space-y-2">
+                {data.citation_gaps.slice(0, 3).map((gap: any, index: number) => (
+                  <div key={index} className="bg-red-50 p-3 rounded border border-red-200">
+                    <SafeRenderer data={gap} className="text-sm text-red-700" />
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+          
+          {data?.bibliometric_indicators && (
+            <div>
+              <h4 className="font-semibold text-gray-800 mb-2">Bibliometric Indicators</h4>
+              <div className="grid grid-cols-2 gap-2">
+                {Object.entries(data.bibliometric_indicators).slice(0, 4).map(([key, value]) => (
+                  <div key={key} className="bg-gray-50 p-2 rounded text-center">
+                    <div className="text-sm font-semibold text-gray-800">
+                      <SafeRenderer data={value} />
+                    </div>
+                    <div className="text-xs text-gray-600 capitalize">{key.replace('_', ' ')}</div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+        </div>
+      </ErrorBoundary>
+    );
+  };
 
   const renderSectionContent = () => {
     switch (activeSection) {

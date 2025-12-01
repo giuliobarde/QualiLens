@@ -147,6 +147,19 @@ FIG_TAB_REGEX = re.compile(
     r"^\s*(figure|fig\.|table)\s*\d+[:.)]?", flags=re.IGNORECASE | re.MULTILINE
 )
 
+# Citation/reference extraction patterns
+REFERENCE_SECTION_PATTERNS = [
+    r"^\s*references?\s*$",
+    r"^\s*bibliography\s*$",
+    r"^\s*works?\s+cited\s*$",
+    r"^\s*literature\s+cited\s*$",
+    r"^\s*citations?\s*$",
+]
+
+REFERENCE_SECTION_REGEX = re.compile(
+    "(" + "|".join(REFERENCE_SECTION_PATTERNS) + ")", flags=re.IGNORECASE | re.MULTILINE
+)
+
 
 def _read_file_bytes(path: str) -> bytes:
     with open(path, "rb") as f:
@@ -347,6 +360,461 @@ def _extract_fig_table_cues(text: str) -> List[str]:
         snippet_end = min(line_end + 200, len(text))
         cues.append(text[start:snippet_end].strip())
     return cues
+
+
+def _extract_references_section(full_text: str, sections: List[Section]) -> Optional[str]:
+    """
+    Extract the references/bibliography section from the text.
+    Returns the text content of the references section, or None if not found.
+    """
+    # First, try to find it in sections (most reliable)
+    for section in sections:
+        section_name_lower = section.name.lower()
+        if any(keyword in section_name_lower for keyword in ["reference", "bibliography", "works cited", "literature cited"]):
+            # Additional validation: references section should have some citation-like content
+            section_text = section.text.strip()
+            if len(section_text) > 50:
+                # Check if it contains citation indicators
+                has_citations = (
+                    DOI_REGEX.search(section_text) or
+                    re.search(r'\b(19|20)\d{2}\b', section_text) or  # Years
+                    re.search(r'\b(vol\.|volume|journal|published)\b', section_text, re.IGNORECASE) or
+                    re.search(r'[A-Z][a-z]+,\s+[A-Z]\.', section_text)  # Author patterns
+                )
+                if has_citations:
+                    return section_text
+    
+    # If not found in sections, try direct regex search
+    ref_match = REFERENCE_SECTION_REGEX.search(full_text)
+    if ref_match:
+        # Find the start of the references section
+        start_pos = ref_match.end()
+        
+        # Look for the next major section or end of document
+        # Common patterns: next section heading, appendix, or end of text
+        next_section_patterns = [
+            r"\n\s*(?:appendix|supplementary|acknowledgment|acknowledgement)\s*\n",
+            r"\n\s*(?:figure|table)\s+\d+",
+            r"\n\s*(?:proof|lemma|theorem|corollary)\s+",  # Mathematical sections
+        ]
+        
+        end_pos = len(full_text)
+        for pattern in next_section_patterns:
+            next_match = re.search(pattern, full_text[start_pos:], re.IGNORECASE | re.MULTILINE)
+            if next_match:
+                end_pos = min(end_pos, start_pos + next_match.start())
+        
+        references_text = full_text[start_pos:end_pos].strip()
+        # Validate that it looks like a references section
+        if len(references_text) > 50:
+            # Check if it contains citation indicators
+            has_citations = (
+                DOI_REGEX.search(references_text) or
+                re.search(r'\b(19|20)\d{2}\b', references_text) or  # Years
+                re.search(r'\b(vol\.|volume|journal|published)\b', references_text, re.IGNORECASE) or
+                re.search(r'[A-Z][a-z]+,\s+[A-Z]\.', references_text)  # Author patterns
+            )
+            if has_citations:
+                return references_text
+    
+    return None
+
+
+def _parse_citation(citation_text: str, citation_num: int) -> Dict[str, Any]:
+    """
+    Parse a single citation entry into structured format.
+    Handles multiple citation styles: APA, MLA, Chicago, Vancouver, IEEE, etc.
+    
+    Returns a dict with parsed fields: authors, title, journal, year, doi, etc.
+    """
+    citation_text = citation_text.strip()
+    if not citation_text or len(citation_text) < 10:
+        return {"raw": citation_text, "citation_number": citation_num}
+    
+    parsed = {
+        "raw": citation_text,
+        "citation_number": citation_num,
+        "authors": [],
+        "title": None,
+        "journal": None,
+        "book_title": None,
+        "publisher": None,
+        "year": None,
+        "volume": None,
+        "issue": None,
+        "pages": None,
+        "doi": None,
+        "url": None,
+        "citation_style": None,
+    }
+    
+    # Extract DOI
+    doi_match = DOI_REGEX.search(citation_text)
+    if doi_match:
+        parsed["doi"] = doi_match.group(1)
+    
+    # Extract URL
+    url_match = URL_REGEX.search(citation_text)
+    if url_match:
+        parsed["url"] = url_match.group(0)
+    
+    # Extract year (4-digit year, typically between 1900-2100)
+    year_patterns = [
+        r"\b(19|20)\d{2}\b",  # 1900-2099
+        r"\((\d{4})\)",  # (2023)
+        r"\[(\d{4})\]",  # [2023]
+    ]
+    for pattern in year_patterns:
+        year_match = re.search(pattern, citation_text)
+        if year_match:
+            year_str = year_match.group(1) if year_match.lastindex else year_match.group(0)
+            try:
+                year = int(year_str)
+                if 1900 <= year <= 2100:
+                    parsed["year"] = year
+                    break
+            except ValueError:
+                continue
+    
+    # Try to identify citation style and parse accordingly
+    
+    # APA Style: Author, A. A., & Author, B. B. (Year). Title. Journal, Volume(Issue), Pages. DOI
+    if re.search(r"\((\d{4})\)\.\s+[A-Z]", citation_text) or re.search(r"\.\s+[A-Z][a-z]+,\s+\d+", citation_text):
+        parsed["citation_style"] = "APA"
+        # Extract authors (before year)
+        if parsed["year"]:
+            year_pos = citation_text.find(str(parsed["year"]))
+            authors_text = citation_text[:year_pos].strip()
+            # Split by comma and "&" or "and"
+            authors = re.split(r",\s*(?:and|&)\s*|,\s*", authors_text)
+            parsed["authors"] = [a.strip() for a in authors if a.strip() and len(a.strip()) > 2]
+        
+        # Extract journal (often after title, before volume)
+        journal_match = re.search(r"\.\s+([A-Z][^,]+?),\s+(\d+)", citation_text)
+        if journal_match:
+            parsed["journal"] = journal_match.group(1).strip()
+            parsed["volume"] = journal_match.group(2)
+        
+        # Extract pages (format: pp. 123-145 or 123-145)
+        pages_match = re.search(r"(?:pp\.\s*)?(\d+)\s*[-–]\s*(\d+)", citation_text)
+        if pages_match:
+            parsed["pages"] = f"{pages_match.group(1)}-{pages_match.group(2)}"
+    
+    # Vancouver/Numeric Style: Author. Title. Journal. Year;Volume(Issue):Pages.
+    elif re.search(r"\.\s+\d{4}\s*;\s*\d+", citation_text) or re.search(r"\.\s+\d{4}\s*:\s*\d+", citation_text):
+        parsed["citation_style"] = "Vancouver"
+        # Extract authors (first sentence before period)
+        first_period = citation_text.find(".")
+        if first_period > 0:
+            authors_text = citation_text[:first_period].strip()
+            parsed["authors"] = [authors_text] if authors_text else []
+        
+        # Extract journal (between title and year)
+        if parsed["year"]:
+            year_str = str(parsed["year"])
+            year_pos = citation_text.find(year_str)
+            if year_pos > 0:
+                # Look backwards for journal name
+                before_year = citation_text[:year_pos].strip()
+                # Find last period before year
+                last_period = before_year.rfind(".")
+                if last_period > 0:
+                    journal_candidate = before_year[last_period+1:].strip()
+                    if len(journal_candidate) > 3:
+                        parsed["journal"] = journal_candidate
+        
+        # Extract volume and pages (format: 2023;15(3):123-145)
+        volume_pages_match = re.search(rf"{parsed['year']}\s*;\s*(\d+)(?:\((\d+)\))?\s*:\s*(\d+[-–]?\d*)", citation_text)
+        if volume_pages_match:
+            parsed["volume"] = volume_pages_match.group(1)
+            if volume_pages_match.group(2):
+                parsed["issue"] = volume_pages_match.group(2)
+            parsed["pages"] = volume_pages_match.group(3)
+    
+    # IEEE Style: A. Author, "Title," Journal, vol. X, no. Y, pp. Z, Year.
+    elif re.search(r'"[^"]+",\s*[A-Z]', citation_text) and re.search(r"vol\.\s*\d+", citation_text, re.IGNORECASE):
+        parsed["citation_style"] = "IEEE"
+        # Extract title (in quotes)
+        title_match = re.search(r'"([^"]+)"', citation_text)
+        if title_match:
+            parsed["title"] = title_match.group(1)
+        
+        # Extract authors (before title)
+        if title_match:
+            authors_text = citation_text[:title_match.start()].strip().rstrip(",")
+            authors = re.split(r",\s*", authors_text)
+            parsed["authors"] = [a.strip() for a in authors if a.strip()]
+        
+        # Extract volume
+        vol_match = re.search(r"vol\.\s*(\d+)", citation_text, re.IGNORECASE)
+        if vol_match:
+            parsed["volume"] = vol_match.group(1)
+        
+        # Extract issue
+        issue_match = re.search(r"no\.\s*(\d+)", citation_text, re.IGNORECASE)
+        if issue_match:
+            parsed["issue"] = issue_match.group(1)
+        
+        # Extract pages
+        pages_match = re.search(r"pp\.\s*(\d+[-–]?\d*)", citation_text, re.IGNORECASE)
+        if pages_match:
+            parsed["pages"] = pages_match.group(1)
+    
+    # MLA Style: Author. "Title." Journal, vol. X, no. Y, Year, pp. Z.
+    elif re.search(r'"[^"]+",\s*[A-Z]', citation_text) and re.search(r"vol\.\s*\d+", citation_text, re.IGNORECASE):
+        # Similar to IEEE but different ordering
+        if not parsed["citation_style"]:
+            parsed["citation_style"] = "MLA"
+            title_match = re.search(r'"([^"]+)"', citation_text)
+            if title_match:
+                parsed["title"] = title_match.group(1)
+    
+    # Chicago Style: Author. "Title." Journal Volume, no. Issue (Year): Pages.
+    elif re.search(r"\(\d{4}\)\s*:\s*\d+", citation_text):
+        parsed["citation_style"] = "Chicago"
+        # Extract authors (first part before period)
+        first_period = citation_text.find(".")
+        if first_period > 0:
+            authors_text = citation_text[:first_period].strip()
+            parsed["authors"] = [authors_text] if authors_text else []
+    
+    # Generic fallback: try to extract common elements
+    if not parsed["citation_style"]:
+        parsed["citation_style"] = "Unknown"
+        
+        # Try to extract title (often in quotes or italics, or first capitalized phrase)
+        title_match = re.search(r'"([^"]+)"', citation_text)
+        if title_match:
+            parsed["title"] = title_match.group(1)
+        else:
+            # Look for capitalized phrase that might be a title
+            title_candidate = re.search(r"\.\s+([A-Z][^.]{10,80})\.", citation_text)
+            if title_candidate:
+                parsed["title"] = title_candidate.group(1).strip()
+        
+        # Extract authors (first part, often ends with comma or period)
+        if not parsed["authors"]:
+            # Look for name patterns: "Last, First" or "First Last"
+            author_match = re.search(r"^([A-Z][a-z]+(?:\s+[A-Z]\.?)?(?:\s+[A-Z][a-z]+)*)", citation_text)
+            if author_match:
+                parsed["authors"] = [author_match.group(1).strip()]
+        
+        # Extract journal (often capitalized, before volume/year)
+        if not parsed["journal"]:
+            journal_match = re.search(r"\.\s+([A-Z][A-Za-z\s&]+?)(?:,\s*(?:vol\.|no\.|\d{4}))", citation_text)
+            if journal_match:
+                journal_candidate = journal_match.group(1).strip()
+                if len(journal_candidate) > 3 and len(journal_candidate) < 100:
+                    parsed["journal"] = journal_candidate
+    
+    # Extract volume and issue if not already extracted
+    if not parsed["volume"]:
+        vol_match = re.search(r"(?:vol\.|volume|vol)\s*[:\s]*(\d+)", citation_text, re.IGNORECASE)
+        if vol_match:
+            parsed["volume"] = vol_match.group(1)
+    
+    if not parsed["issue"]:
+        issue_match = re.search(r"(?:no\.|number|issue|iss)\s*[:\s]*(\d+)", citation_text, re.IGNORECASE)
+        if issue_match:
+            parsed["issue"] = issue_match.group(1)
+    
+    if not parsed["pages"]:
+        pages_match = re.search(r"(?:pp?\.|pages?)\s*[:\s]*(\d+[-–]?\d*)", citation_text, re.IGNORECASE)
+        if pages_match:
+            parsed["pages"] = pages_match.group(1)
+    
+    return parsed
+
+
+def _is_valid_citation(citation_text: str) -> bool:
+    """
+    Validate if a text snippet is likely a real citation.
+    Filters out proof text, mathematical expressions, and other non-citation content.
+    
+    Returns True if the text appears to be a valid citation.
+    """
+    if not citation_text or len(citation_text.strip()) < 20:
+        return False
+    
+    text_lower = citation_text.lower()
+    text_stripped = citation_text.strip()
+    
+    # Filter out proof language and mathematical content
+    proof_indicators = [
+        r'\bby\s+induction\b',
+        r'\bthe\s+proof\s+is\b',
+        r'\bwe\s+prove\b',
+        r'\bproof\s+by\b',
+        r'\blet\s+\w+\s+be\b',
+        r'\bthus\s+\w+',
+        r'\bassume\s+that\b',
+        r'\bsuppose\s+that\b',
+        r'\bit\s+follows\s+that\b',
+        r'\bwe\s+show\s+that\b',
+        r'\bwe\s+have\b',
+        r'\bconsider\s+the\b',
+    ]
+    
+    for pattern in proof_indicators:
+        if re.search(pattern, text_lower):
+            return False
+    
+    # Filter out mathematical expressions (Greek letters, subscripts, mathematical operators)
+    # Citations rarely contain complex mathematical notation
+    greek_letters = r'[αβγδεζηθικλμνξοπρστυφχψωΑΒΓΔΕΖΗΘΙΚΛΜΝΞΟΠΡΣΤΥΦΧΨΩ]'
+    if re.search(greek_letters, citation_text):
+        # Allow if it's part of a DOI or URL, but not if it's standalone math
+        if not (DOI_REGEX.search(citation_text) or URL_REGEX.search(citation_text)):
+            # Check if it's mostly mathematical (high ratio of Greek/math symbols)
+            math_chars = len(re.findall(greek_letters + r'|[\^_\{\}\(\)\[\]=\+\-×÷]', citation_text))
+            if math_chars > len(citation_text) * 0.1:  # More than 10% math symbols
+                return False
+    
+    # Filter out text that starts with common proof words
+    proof_starters = ['let ', 'we ', 'thus ', 'therefore ', 'hence ', 'assume ', 'suppose ']
+    first_words = text_stripped[:20].lower()
+    if any(first_words.startswith(starter) for starter in proof_starters):
+        # But allow if it has citation indicators
+        has_citation_indicators = (
+            DOI_REGEX.search(citation_text) or
+            URL_REGEX.search(citation_text) or
+            re.search(r'\b(19|20)\d{2}\b', citation_text) or  # Year
+            re.search(r'\b(vol\.|volume|journal|published|press|university|edition)\b', text_lower)
+        )
+        if not has_citation_indicators:
+            return False
+    
+    # Citations should have at least one of these indicators:
+    citation_indicators = [
+        DOI_REGEX.search(citation_text),  # DOI
+        URL_REGEX.search(citation_text),  # URL
+        re.search(r'\b(19|20)\d{2}\b', citation_text),  # Year (1900-2099)
+        re.search(r'\b(vol\.|volume|vol\.|no\.|number|issue|pp\.|pages?|journal|journal of|proceedings|conference|workshop|symposium)\b', text_lower),  # Publication indicators
+        re.search(r'\b(published|press|university|publisher|edition|ed\.|editor|eds\.)\b', text_lower),  # Publisher indicators
+        re.search(r'[A-Z][a-z]+\s+[A-Z]\.\s+[A-Z][a-z]+', citation_text),  # Author name pattern (e.g., "Smith, J. R.")
+        re.search(r'[A-Z][a-z]+,\s+[A-Z]\.', citation_text),  # Author name pattern (e.g., "Smith, J.")
+    ]
+    
+    # If it has at least one citation indicator, it's likely valid
+    if any(citation_indicators):
+        return True
+    
+    # If it's very short and has no indicators, it's probably not a citation
+    if len(citation_text.strip()) < 50:
+        return False
+    
+    # Check for author-like patterns (Last, First or First Last with initials)
+    author_patterns = [
+        r'^[A-Z][a-z]+,\s+[A-Z]\.',  # "Smith, J."
+        r'^[A-Z][a-z]+\s+[A-Z]\.\s+[A-Z][a-z]+',  # "Smith J. R."
+        r'^[A-Z][a-z]+\s+and\s+[A-Z][a-z]+',  # "Smith and Jones"
+        r'^[A-Z][a-z]+,\s+[A-Z]\.\s+[A-Z]\.',  # "Smith, J. R."
+    ]
+    
+    if any(re.match(pattern, text_stripped) for pattern in author_patterns):
+        return True
+    
+    # If none of the above, it's probably not a citation
+    return False
+
+
+def _extract_citations(references_text: str) -> List[Dict[str, Any]]:
+    """
+    Extract individual citations from the references section.
+    Handles various numbering formats and citation styles.
+    Filters out non-citation text (proofs, mathematical expressions, etc.).
+    
+    Returns a list of parsed citation dictionaries.
+    """
+    if not references_text or len(references_text.strip()) < 20:
+        return []
+    
+    citations = []
+    
+    # Split references by common patterns
+    # Patterns for citation starts:
+    # 1. Numbered: "1.", "1)", "[1]", "(1)"
+    # 2. Bulleted: "-", "•", "*"
+    # 3. Author-year: "Author, A. (2023)"
+    
+    # Try numbered format first (most common)
+    numbered_pattern = re.compile(
+        r"^\s*(?:\[?\d+\]?[.)]\s*|\(\d+\)\s*)", 
+        re.MULTILINE | re.IGNORECASE
+    )
+    
+    # Split by numbered citations
+    parts = re.split(numbered_pattern, references_text)
+    
+    # If splitting by numbers didn't work well, try other methods
+    if len(parts) < 3:
+        # Try splitting by bullet points or line breaks with indentation
+        # Look for lines that start with common citation patterns
+        lines = references_text.split("\n")
+        current_citation = []
+        
+        for line in lines:
+            line_stripped = line.strip()
+            if not line_stripped:
+                if current_citation:
+                    citation_text = " ".join(current_citation).strip()
+                    if len(citation_text) > 20:
+                        citations.append(_parse_citation(citation_text, len(citations) + 1))
+                    current_citation = []
+                continue
+            
+            # Check if this line starts a new citation
+            is_new_citation = (
+                re.match(r"^\d+[.)]\s*", line_stripped) or
+                re.match(r"^\[?\d+\]?\s*", line_stripped) or
+                re.match(r"^[•\-\*]\s*", line_stripped) or
+                (current_citation and 
+                 re.match(r"^[A-Z][a-z]+\s+[A-Z]", line_stripped) and
+                 len(current_citation) > 0 and
+                 len(" ".join(current_citation)) > 50)
+            )
+            
+            if is_new_citation and current_citation:
+                # Save previous citation
+                citation_text = " ".join(current_citation).strip()
+                if len(citation_text) > 20 and _is_valid_citation(citation_text):
+                    citations.append(_parse_citation(citation_text, len(citations) + 1))
+                current_citation = []
+            
+            current_citation.append(line_stripped)
+        
+        # Add last citation
+        if current_citation:
+            citation_text = " ".join(current_citation).strip()
+            if len(citation_text) > 20 and _is_valid_citation(citation_text):
+                citations.append(_parse_citation(citation_text, len(citations) + 1))
+    else:
+        # Process numbered citations
+        citation_num = 1
+        for part in parts[1:]:  # Skip first empty part before first number
+            part = part.strip()
+            if len(part) > 20 and _is_valid_citation(part):  # Validate before adding
+                # Clean up: remove leading numbers/bullets if any
+                part = re.sub(r"^\s*[•\-\*]\s*", "", part)
+                citations.append(_parse_citation(part, citation_num))
+                citation_num += 1
+    
+    # If we still don't have many citations, try a more aggressive approach
+    # But be more careful with validation
+    if len(citations) < 3:
+        # Split by double newlines or periods followed by newlines (end of citation)
+        # This is a fallback for poorly formatted references
+        potential_citations = re.split(r"\n\s*\n|\.\s*\n(?=[A-Z])", references_text)
+        if len(potential_citations) > len(citations):
+            citations = []
+            for i, cit_text in enumerate(potential_citations, 1):
+                cit_text = cit_text.strip()
+                # Validate before adding - be stricter in fallback mode
+                if len(cit_text) > 30 and _is_valid_citation(cit_text):
+                    citations.append(_parse_citation(cit_text, i))
+    
+    logger.info(f"Extracted {len(citations)} citations from references section")
+    return citations
 
 
 def _safe_int(x: Any) -> Optional[int]:
@@ -701,6 +1169,15 @@ class ParsePDFTool(BaseTool):
         # References
         dois = sorted(set(m.group(1) for m in DOI_REGEX.finditer(full_text)))
         urls = sorted(set(URL_REGEX.findall(full_text)))
+        
+        # Extract citations from references section
+        references_section = _extract_references_section(full_text, sections)
+        citations = []
+        if references_section:
+            citations = _extract_citations(references_section)
+            logger.info(f"Extracted {len(citations)} citations from references section")
+        else:
+            logger.warning("Could not find references section in PDF")
 
         # Figures/Tables cues
         figtab = _extract_fig_table_cues(full_text)
@@ -736,6 +1213,9 @@ class ParsePDFTool(BaseTool):
             "chunks": chunks,
             "dois": dois,
             "urls": urls,
+            "citations": citations,  # NEW: Extracted citations
+            "references_section": references_section if references_section else None,  # NEW: Full references text
+            "num_citations": len(citations),  # NEW: Count of extracted citations
             "figure_table_cues": figtab,
             "tool_used": "parse_pdf"
         }

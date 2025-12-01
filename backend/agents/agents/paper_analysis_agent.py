@@ -122,6 +122,7 @@ class PaperAnalysisAgent(BaseAgent):
             pdf_pages = None
             pages_with_coords = None
             evidence_collector = None
+            extracted_citations = None
             
             # Check if we have a file path to parse (from upload or query)
             file_path = None
@@ -135,6 +136,8 @@ class PaperAnalysisAgent(BaseAgent):
                 file_path is not None
             )
             
+            # Store PDF result for later use (e.g., citations)
+            pdf_result = None
             if should_parse_pdf:
                 pdf_result = self._parse_pdf_if_needed(classification.extracted_parameters or {})
                 if pdf_result and pdf_result.get("success"):
@@ -153,6 +156,11 @@ class PaperAnalysisAgent(BaseAgent):
                     if "pages_with_coords" in pdf_result:
                         pages_with_coords = pdf_result["pages_with_coords"]
                         logger.info(f"Extracted coordinate data for {len(pages_with_coords)} pages")
+                    
+                    # Extract citations if available
+                    extracted_citations = pdf_result.get("citations", [])
+                    if extracted_citations:
+                        logger.info(f"Extracted {len(extracted_citations)} citations from PDF")
                     
                     tools_used.append("parse_pdf")
             
@@ -187,7 +195,7 @@ class PaperAnalysisAgent(BaseAgent):
             logger.info(f"Running analysis pipeline for level: {analysis_level}")
             logger.info(f"Text content length: {len(text_content) if text_content else 0}")
             analysis_results = self._run_analysis_pipeline(
-                text_content, analysis_level, query, evidence_collector
+                text_content, analysis_level, query, evidence_collector, extracted_citations
             )
             tools_used.extend(analysis_results.get("tools_used", []))
             logger.info(f"Analysis pipeline completed. Tools used: {analysis_results.get('tools_used', [])}")
@@ -260,7 +268,8 @@ class PaperAnalysisAgent(BaseAgent):
     
     def _run_analysis_pipeline(
         self, text_content: str, analysis_level: str, query: str, 
-        evidence_collector: Optional[EvidenceCollector] = None
+        evidence_collector: Optional[EvidenceCollector] = None,
+        extracted_citations: Optional[List[Dict[str, Any]]] = None
     ) -> Dict[str, Any]:
         """
         Run comprehensive analysis pipeline with all tools.
@@ -293,7 +302,7 @@ class PaperAnalysisAgent(BaseAgent):
                 try:
                     # Try to use asyncio.run (Python 3.7+)
                     results = asyncio.run(
-                        self._run_analysis_pipeline_async(text_content, analysis_level, query, evidence_collector)
+                        self._run_analysis_pipeline_async(text_content, analysis_level, query, evidence_collector, extracted_citations)
                     )
                 except RuntimeError:
                     # Fallback: create new event loop
@@ -301,7 +310,7 @@ class PaperAnalysisAgent(BaseAgent):
                     asyncio.set_event_loop(loop)
                     try:
                         results = loop.run_until_complete(
-                            self._run_analysis_pipeline_async(text_content, analysis_level, query, evidence_collector)
+                            self._run_analysis_pipeline_async(text_content, analysis_level, query, evidence_collector, extracted_citations)
                         )
                     finally:
                         loop.close()
@@ -407,7 +416,8 @@ class PaperAnalysisAgent(BaseAgent):
             citation_result = self.execute_tool(
                 "citation_analyzer_tool",
                 text_content=text_content,
-                analysis_type="bibliometric"
+                analysis_type="bibliometric",
+                extracted_citations=extracted_citations
             )
             if citation_result.get("success"):
                 results["citation_analysis"] = citation_result
@@ -434,7 +444,8 @@ class PaperAnalysisAgent(BaseAgent):
     
     async def _run_analysis_pipeline_async(
         self, text_content: str, analysis_level: str, query: str, 
-        evidence_collector: Optional[EvidenceCollector] = None
+        evidence_collector: Optional[EvidenceCollector] = None,
+        extracted_citations: Optional[List[Dict[str, Any]]] = None
     ) -> Dict[str, Any]:
         """
         Async version of analysis pipeline with parallel execution.
@@ -478,7 +489,7 @@ class PaperAnalysisAgent(BaseAgent):
                 run_tool_async("methodology_analyzer_tool", text_content=text_content, analysis_depth="comprehensive", evidence_collector=evidence_collector),
                 run_tool_async("statistical_validator_tool", text_content=text_content, validation_level="comprehensive", evidence_collector=evidence_collector),
                 run_tool_async("research_gap_identifier_tool", text_content=text_content, future_focus="comprehensive", evidence_collector=evidence_collector),
-                run_tool_async("citation_analyzer_tool", text_content=text_content, analysis_type="bibliometric"),
+                run_tool_async("citation_analyzer_tool", text_content=text_content, analysis_type="bibliometric", extracted_citations=extracted_citations),
             ]
             
             # Wait for all independent tools to complete
@@ -725,6 +736,9 @@ class PaperAnalysisAgent(BaseAgent):
                 integrated_result["reference_analysis"] = citation_data.get("reference_analysis", {})
                 integrated_result["citation_gaps"] = citation_data.get("citation_gaps", [])
                 integrated_result["bibliometric_indicators"] = citation_data.get("bibliometric_indicators", {})
+                # Include extracted citations for frontend display
+                integrated_result["extracted_citations"] = citation_data.get("extracted_citations", [])
+                integrated_result["citation_analysis"] = citation_data  # Keep full citation_analysis object
             
             # Add quality assessment if available (but don't override methodology score)
             if "quality_assessment" in analysis_results:

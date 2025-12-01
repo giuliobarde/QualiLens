@@ -41,7 +41,7 @@ class CitationAnalyzerTool(BaseTool):
             description="Analyze references, citations, and bibliometric information",
             parameters={
                 "required": ["text_content"],
-                "optional": ["analysis_type", "citation_focus"],
+                "optional": ["analysis_type", "citation_focus", "extracted_citations"],
                 "properties": {
                     "text_content": {
                         "type": "string",
@@ -56,6 +56,11 @@ class CitationAnalyzerTool(BaseTool):
                         "type": "array",
                         "description": "Specific aspects of citations to focus on",
                         "default": []
+                    },
+                    "extracted_citations": {
+                        "type": "array",
+                        "description": "Pre-extracted citations from PDF parsing (optional)",
+                        "default": []
                     }
                 }
             },
@@ -68,7 +73,8 @@ class CitationAnalyzerTool(BaseTool):
         )
     
     def execute(self, text_content: str, analysis_type: str = "detailed",
-                citation_focus: Optional[List[str]] = None) -> Dict[str, Any]:
+                citation_focus: Optional[List[str]] = None,
+                extracted_citations: Optional[List[Dict[str, Any]]] = None) -> Dict[str, Any]:
         """
         Analyze citations and references.
         
@@ -76,6 +82,7 @@ class CitationAnalyzerTool(BaseTool):
             text_content: The text content to analyze
             analysis_type: Type of citation analysis
             citation_focus: Specific aspects to focus on
+            extracted_citations: Pre-extracted citations from PDF parsing (optional)
             
         Returns:
             Dict containing citation analysis results
@@ -83,17 +90,33 @@ class CitationAnalyzerTool(BaseTool):
         try:
             logger.info("Analyzing citations with bibliometric type")
             
-            # Always use bibliometric citation analysis
-            citation_result = self._analyze_bibliometric_citations(text_content, citation_focus)
+            # Use extracted citations if available, otherwise analyze from text
+            if extracted_citations and len(extracted_citations) > 0:
+                logger.info(f"Using {len(extracted_citations)} pre-extracted citations")
+                citation_result = self._analyze_bibliometric_citations(
+                    text_content, citation_focus, extracted_citations
+                )
+                # Use actual count from extracted citations if LLM didn't provide a better estimate
+                total_citations = citation_result.get("total_citations", len(extracted_citations))
+                if total_citations < len(extracted_citations):
+                    total_citations = len(extracted_citations)
+            else:
+                logger.info("No pre-extracted citations found, analyzing from text content")
+                citation_result = self._analyze_bibliometric_citations(
+                    text_content, citation_focus, None
+                )
+                total_citations = citation_result.get("total_citations", 0)
             
             return {
                 "success": True,
-                "total_citations": citation_result.get("total_citations", 0),
+                "total_citations": total_citations,
                 "citation_quality": citation_result.get("citation_quality", ""),
                 "reference_analysis": citation_result.get("reference_analysis", {}),
                 "bibliometric_indicators": citation_result.get("bibliometric_indicators", {}),
                 "citation_gaps": citation_result.get("citation_gaps", []),
                 "recommendations": citation_result.get("recommendations", []),
+                "extracted_citations_count": len(extracted_citations) if extracted_citations else 0,
+                "extracted_citations": extracted_citations if extracted_citations else [],
                 "analysis_type": "bibliometric",
                 "citation_focus": citation_focus or [],
                 "tool_used": "citation_analyzer_tool"
@@ -107,14 +130,40 @@ class CitationAnalyzerTool(BaseTool):
                 "tool_used": "citation_analyzer_tool"
             }
     
-    def _analyze_bibliometric_citations(self, text_content: str, citation_focus: Optional[List[str]]) -> Dict[str, Any]:
+    def _analyze_bibliometric_citations(self, text_content: str, citation_focus: Optional[List[str]], 
+                                        extracted_citations: Optional[List[Dict[str, Any]]] = None) -> Dict[str, Any]:
         """Analyze bibliometric citation elements."""
         try:
+            # Build citations context if extracted citations are available
+            citations_context = ""
+            if extracted_citations and len(extracted_citations) > 0:
+                citations_summary = []
+                for i, cit in enumerate(extracted_citations[:50], 1):  # Limit to first 50 for prompt
+                    cit_info = f"Citation {i}:"
+                    if cit.get("authors"):
+                        cit_info += f" Authors: {', '.join(cit['authors'][:3])}"
+                    if cit.get("title"):
+                        cit_info += f" Title: {cit['title'][:100]}"
+                    if cit.get("journal"):
+                        cit_info += f" Journal: {cit['journal']}"
+                    if cit.get("year"):
+                        cit_info += f" Year: {cit['year']}"
+                    if cit.get("doi"):
+                        cit_info += f" DOI: {cit['doi']}"
+                    citations_summary.append(cit_info)
+                
+                citations_context = f"""
+EXTRACTED CITATIONS FROM PDF ({len(extracted_citations)} total):
+{chr(10).join(citations_summary)}
+"""
+            
             prompt = f"""
 You are an expert bibliometrician. Provide a comprehensive bibliometric analysis of the citations and references in this research paper.
 
 PAPER CONTENT:
 {text_content[:6000]}
+
+{citations_context}
 
 {f"SPECIFIC ASPECTS TO FOCUS ON: {', '.join(citation_focus)}" if citation_focus else ""}
 
