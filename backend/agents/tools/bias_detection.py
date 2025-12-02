@@ -25,6 +25,141 @@ from tool_result_cache import ToolResultCache
 logger = logging.getLogger(__name__)
 
 
+def _find_word_boundary(text: str, position: int, direction: str = 'backward') -> int:
+    """
+    Find the nearest word boundary (start or end of word) from a position.
+    
+    Args:
+        text: The text to search in
+        position: The position to start from
+        direction: 'backward' to find start of word, 'forward' to find end of word
+        
+    Returns:
+        Position of the word boundary
+    """
+    if direction == 'backward':
+        # Find the start of the word (first non-whitespace, non-punctuation before position)
+        for i in range(position, max(0, position - 50), -1):
+            if i == 0 or (i > 0 and text[i-1] in ' \n\t.,;:!?'):
+                # Check if current position is start of word
+                if i < len(text) and text[i] not in ' \n\t.,;:!?':
+                    return i
+        return max(0, position - 50)
+    else:  # forward
+        # Find the end of the word (first whitespace or punctuation after position)
+        for i in range(position, min(len(text), position + 50)):
+            if i < len(text) and text[i] in ' \n\t.,;:!?':
+                return i
+        return min(len(text), position + 50)
+
+
+def _find_sentence_boundary(text: str, max_length: int) -> int:
+    """
+    Find the nearest sentence boundary (period, exclamation, question mark) before max_length.
+    Ensures text doesn't end mid-sentence.
+    
+    Args:
+        text: The text to truncate
+        max_length: Maximum desired length
+        
+    Returns:
+        Position to truncate at (at sentence boundary)
+    """
+    if len(text) <= max_length:
+        return len(text)
+    
+    # Look for sentence endings in the last 200 characters before max_length
+    search_start = max(0, max_length - 200)
+    search_end = min(len(text), max_length + 50)
+    search_text = text[search_start:search_end]
+    
+    # Find the last sentence boundary (period, exclamation, question mark followed by space or newline)
+    # Look for patterns like ". ", "! ", "? ", ".\n", "!\n", "?\n"
+    best_pos = max_length
+    
+    # Try to find sentence endings
+    for pattern in [r'\.\s+', r'!\s+', r'\?\s+', r'\.\n', r'!\n', r'\?\n']:
+        matches = list(re.finditer(pattern, search_text))
+        if matches:
+            # Get the last match before max_length
+            for match in reversed(matches):
+                pos = search_start + match.end()
+                if pos <= max_length and pos > best_pos - 100:  # Prefer closer to max_length
+                    best_pos = pos
+                    break
+    
+    # If we found a sentence boundary, use it
+    if best_pos < max_length and best_pos > max_length - 200:
+        return best_pos
+    
+    # Fallback: try to find word boundary
+    return _find_word_boundary(text, max_length, 'backward')
+
+
+def _extract_text_with_context(text_content: str, search_term: str, context_before: int = 300, context_after: int = 700) -> str:
+    """
+    Extract text around a search term, ensuring we start and end at word boundaries.
+    
+    Args:
+        text_content: The full text content
+        search_term: The term to search for
+        context_before: Characters of context before the term
+        context_after: Characters of context after the term
+        
+    Returns:
+        Extracted text starting and ending at word boundaries
+    """
+    text_lower = text_content.lower()
+    term_lower = search_term.lower()
+    
+    idx_pos = text_lower.find(term_lower)
+    if idx_pos == -1:
+        return ""
+    
+    # Calculate rough boundaries
+    rough_start = max(0, idx_pos - context_before)
+    rough_end = min(len(text_content), idx_pos + len(search_term) + context_after)
+    
+    # Find word boundaries
+    start = _find_word_boundary(text_content, rough_start, 'backward')
+    end = _find_word_boundary(text_content, rough_end, 'forward')
+    
+    extracted = text_content[start:end].strip()
+    
+    # Clean up: remove leading/trailing incomplete sentences if they exist
+    # Remove leading text that doesn't start with capital letter or is very short
+    if len(extracted) > 50:
+        # Find first sentence start (capital letter after period/space)
+        first_sentence_match = re.search(r'[.!?]\s+[A-Z]', extracted)
+        if first_sentence_match:
+            extracted = extracted[first_sentence_match.end() - 1:]
+    
+    return extracted
+
+
+def _truncate_at_sentence_boundary(text: str, max_length: int) -> str:
+    """
+    Truncate text at a sentence boundary, ensuring complete sentences.
+    
+    Args:
+        text: The text to truncate
+        max_length: Maximum desired length
+        
+    Returns:
+        Truncated text ending at sentence boundary
+    """
+    if len(text) <= max_length:
+        return text
+    
+    truncate_pos = _find_sentence_boundary(text, max_length)
+    truncated = text[:truncate_pos].strip()
+    
+    # Remove trailing incomplete punctuation
+    truncated = re.sub(r'[.,;:]\s*$', '', truncated)
+    
+    return truncated
+
+
 class BiasDetectionTool(BaseTool):
     """
     Bias Detection tool for identifying potential biases and limitations in research papers.
@@ -160,13 +295,11 @@ class BiasDetectionTool(BaseTool):
 
                             for term in search_terms:
                                 if term in text_content.lower():
-                                    # Find context around the term - extract a larger section
-                                    idx_pos = text_content.lower().find(term)
-                                    start = max(0, idx_pos - 300)
-                                    end = min(len(text_content), idx_pos + 700)
-                                    evidence_text = text_content[start:end].strip()
-                                    logger.info(f"   Found evidence for bias {idx+1} using search term '{term}' (extracted {len(evidence_text)} chars)")
-                                    break
+                                    # Find context around the term - extract a larger section with word boundaries
+                                    evidence_text = _extract_text_with_context(text_content, term, context_before=300, context_after=700)
+                                    if evidence_text:
+                                        logger.info(f"   Found evidence for bias {idx+1} using search term '{term}' (extracted {len(evidence_text)} chars)")
+                                        break
 
                     # Log the source and length of evidence text
                     if bias.get("full_section_text"):
@@ -237,13 +370,23 @@ class BiasDetectionTool(BaseTool):
 
                     # Add evidence to collector
                     # Don't truncate if we have full_section_text - preserve the complete context
-                    max_snippet_length = 1500 if bias.get("full_section_text") else 400
-                    text_to_add = evidence_text[:max_snippet_length] if evidence_text else bias.get("description", "")[:400]
-
-                    # Add ellipsis if truncated
-                    if evidence_text and len(evidence_text) > max_snippet_length:
-                        text_to_add = text_to_add + "... [truncated for display]"
-                        logger.info(f"   ⚠️  Evidence text truncated from {len(evidence_text)} to {max_snippet_length} chars for bias {idx+1}")
+                    max_snippet_length = 2000 if bias.get("full_section_text") else 600
+                    
+                    if evidence_text:
+                        # Truncate at sentence boundary to avoid cutting mid-sentence
+                        if len(evidence_text) > max_snippet_length:
+                            text_to_add = _truncate_at_sentence_boundary(evidence_text, max_snippet_length)
+                            if len(text_to_add) < len(evidence_text):
+                                logger.info(f"   ⚠️  Evidence text truncated from {len(evidence_text)} to {len(text_to_add)} chars (at sentence boundary) for bias {idx+1}")
+                        else:
+                            text_to_add = evidence_text
+                    else:
+                        # Fallback to description, also truncate at sentence boundary
+                        description = bias.get("description", "")
+                        if description:
+                            text_to_add = _truncate_at_sentence_boundary(description, 600)
+                        else:
+                            text_to_add = ""
 
                     evidence_id = evidence_collector.add_evidence(
                         category="bias",
@@ -291,9 +434,14 @@ class BiasDetectionTool(BaseTool):
                     rationale_parts.append(f"\n📊 Confidence Level: {confidence_percentage}%")
                     full_rationale = "\n".join(rationale_parts)
                     
+                    # Truncate limitation text at sentence boundary
+                    limitation_evidence = limitation_snippet if limitation_snippet else limitation_text
+                    if limitation_evidence:
+                        limitation_evidence = _truncate_at_sentence_boundary(limitation_evidence, 800)
+                    
                     evidence_collector.add_evidence(
                         category="bias",
-                        text_snippet=limitation_snippet[:500] if limitation_snippet else limitation_text[:500],
+                        text_snippet=limitation_evidence,
                         rationale=full_rationale[:2000],
                         confidence=confidence,
                         severity="low",
@@ -336,9 +484,14 @@ class BiasDetectionTool(BaseTool):
                     rationale_parts.append(f"\n📊 Confidence Level: {confidence_percentage}%")
                     full_rationale = "\n".join(rationale_parts)
                     
+                    # Truncate confounder text at sentence boundary
+                    confounder_evidence = confounder_snippet if confounder_snippet else confounder_text
+                    if confounder_evidence:
+                        confounder_evidence = _truncate_at_sentence_boundary(confounder_evidence, 800)
+                    
                     evidence_collector.add_evidence(
                         category="bias",
-                        text_snippet=confounder_snippet[:500] if confounder_snippet else confounder_text[:500],
+                        text_snippet=confounder_evidence,
                         rationale=full_rationale[:2000],
                         confidence=confidence,
                         severity="medium",
@@ -591,11 +744,10 @@ REMEMBER: You MUST find biases. If the paper has "single-center", "per-protocol"
                     for match in pattern_matches:
                         # Try to find the text in the paper
                         match_text_lower = match['text'].lower()
-                        idx = text_for_analysis.lower().find(match_text_lower)
-                        if idx != -1:
-                            start = max(0, idx - 200)
-                            end = min(len(text_for_analysis), idx + len(match['text']) + 500)
-                            full_text = text_for_analysis[start:end]
+                        # Use improved extraction with word boundaries
+                        full_text = _extract_text_with_context(text_for_analysis, match['text'], context_before=200, context_after=500)
+                        if not full_text:
+                            full_text = match['text']
                         else:
                             full_text = match['text']
                         
@@ -635,11 +787,10 @@ REMEMBER: You MUST find biases. If the paper has "single-center", "per-protocol"
                         )
                         if not pattern_detected:
                             # Add pattern match as a detected bias
-                            idx = text_for_analysis.lower().find(pattern['text'].lower())
-                            if idx != -1:
-                                start = max(0, idx - 200)
-                                end = min(len(text_for_analysis), idx + len(pattern['text']) + 500)
-                                full_text = text_for_analysis[start:end]
+                            # Use improved extraction with word boundaries
+                            full_text = _extract_text_with_context(text_for_analysis, pattern['text'], context_before=200, context_after=500)
+                            if not full_text:
+                                full_text = pattern['text']
                             else:
                                 full_text = pattern['text']
                             
@@ -672,11 +823,10 @@ REMEMBER: You MUST find biases. If the paper has "single-center", "per-protocol"
                     logger.warning("⚠️ Using pattern matches as fallback due to JSON parse error")
                     detected_biases = []
                     for match in pattern_matches:
-                        idx = text_for_analysis.lower().find(match['text'].lower())
-                        if idx != -1:
-                            start = max(0, idx - 200)
-                            end = min(len(text_for_analysis), idx + len(match['text']) + 500)
-                            full_text = text_for_analysis[start:end]
+                        # Use improved extraction with word boundaries
+                        full_text = _extract_text_with_context(text_for_analysis, match['text'], context_before=200, context_after=500)
+                        if not full_text:
+                            full_text = match['text']
                         else:
                             full_text = match['text']
                         
@@ -744,9 +894,7 @@ REMEMBER: You MUST find biases. If the paper has "single-center", "per-protocol"
                     break
         
         if idx != -1:
-            # Extract context around the match
-            start = max(0, idx - 200)
-            end = min(len(text_content), idx + len(search_text) + 300)
-            return text_content[start:end].strip()
+            # Extract context around the match with word boundaries
+            return _extract_text_with_context(text_content, search_text, context_before=200, context_after=300)
         
         return None

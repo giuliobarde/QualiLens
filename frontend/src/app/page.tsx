@@ -711,8 +711,8 @@ export default function Home() {
 
               {/* Bottom Row: Analysis Sections - Full Width */}
               <div className="bg-white/95 backdrop-blur-sm rounded-2xl shadow-lg overflow-hidden border border-gray-200/50">
-                  <ScrollableAnalysisSections 
-                    data={analysisResult} 
+                  <ScrollableAnalysisSections
+                    data={analysisResult}
                     onExportFunctionsReady={setAnalysisExportFunctions}
                   />
               </div>

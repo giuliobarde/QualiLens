@@ -773,21 +773,84 @@ export default function ScrollableAnalysisSections({ data, className = '', onExp
     </ErrorBoundary>
   );
 
-  const renderGaps = () => (
-    <ErrorBoundary>
-      <div className="space-y-4">
-        {data?.research_gaps && Array.isArray(data.research_gaps) && data.research_gaps.length > 0 && (
-          <div>
-            <h4 className="font-semibold text-yellow-800 mb-2">Research Gaps ({data.research_gaps.length})</h4>
-            <div className="space-y-2">
-              {data.research_gaps.slice(0, 3).map((gap: any, index: number) => (
-                <div key={index} className="bg-yellow-50 p-3 rounded border border-yellow-200">
-                  <SafeRenderer data={gap} className="text-sm text-yellow-700" />
+  const renderGaps = () => {
+    // Collect research gaps from data.research_gaps
+    const researchGaps = data?.research_gaps && Array.isArray(data.research_gaps) ? data.research_gaps : [];
+    
+    // Collect research gap evidence traces
+    const researchGapEvidence = data?.evidence_traces && Array.isArray(data.evidence_traces)
+      ? data.evidence_traces.filter((e: any) => e.category === 'research_gap')
+      : [];
+    
+    // Combine both sources
+    const allResearchGaps: any[] = [];
+    
+    // Add research gaps from data.research_gaps
+    researchGaps.forEach((gap: any) => {
+      allResearchGaps.push({
+        type: 'gap',
+        content: typeof gap === 'string' 
+          ? gap 
+          : gap.description || gap.gap || gap.text || JSON.stringify(gap),
+        original: gap
+      });
+    });
+    
+    // Add research gap evidence traces
+    researchGapEvidence.forEach((evidence: any) => {
+      // Use rationale if available, otherwise use text_snippet
+      const content = evidence.rationale || evidence.text_snippet || '';
+      if (content) {
+        allResearchGaps.push({
+          type: 'evidence',
+          content: content,
+          page: evidence.page_number,
+          textSnippet: evidence.text_snippet,
+          original: evidence
+        });
+      }
+    });
+    
+    const totalCount = allResearchGaps.length;
+    
+    return (
+      <ErrorBoundary>
+        <div className="space-y-4">
+          {totalCount > 0 && (
+            <div className="bg-white border-2 border-yellow-200 rounded-xl p-5 hover:border-yellow-300 transition-all shadow-sm">
+              <div className="flex items-center justify-between mb-4">
+                <div className="flex items-center">
+                  <svg className="w-5 h-5 text-yellow-600 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-3 7h3m-3 4h3m-6-4h.01M9 16h.01" />
+                  </svg>
+                  <h4 className="font-bold text-gray-800 text-lg">Research Gaps</h4>
                 </div>
-              ))}
+                <span className="text-xs text-gray-500 bg-gray-100 px-2 py-1 rounded-full">{totalCount}</span>
+              </div>
+              <div className="space-y-3">
+                {allResearchGaps.map((item: any, index: number) => {
+                  const gapText = typeof item.content === 'string' ? item.content : (item.content?.text || item.content?.description || String(item.content));
+                  return (
+                    <div key={index} className="bg-gradient-to-r from-yellow-50 to-orange-50 p-4 rounded-lg border border-yellow-200 hover:shadow-md transition-all">
+                      <div className="flex items-start space-x-3">
+                        <div className="flex-shrink-0 w-6 h-6 bg-yellow-500 text-white rounded-full flex items-center justify-center text-xs font-bold">
+                          {index + 1}
+                        </div>
+                        <div className="flex-1">
+                          <p className="text-sm text-gray-700 leading-relaxed">
+                            <SafeRenderer data={gapText} />
+                          </p>
+                          {item.page && (
+                            <span className="text-xs text-yellow-600 mt-1 inline-block">(Page {item.page})</span>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
             </div>
-          </div>
-        )}
+          )}
         
         {data?.future_directions && Array.isArray(data.future_directions) && data.future_directions.length > 0 && (
           <div>
@@ -818,7 +881,8 @@ export default function ScrollableAnalysisSections({ data, className = '', onExp
         )}
       </div>
     </ErrorBoundary>
-  );
+    );
+  };
 
   const renderCitations = () => {
     // Get citations from various possible locations

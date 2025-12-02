@@ -29,9 +29,9 @@ interface EvidenceVisualizationProps {
   selectedEvidence?: EvidenceItem | null;
 }
 
-type EvidenceCategory = 'all' | 'bias' | 'methodology' | 'reproducibility' | 'statistics' | 'research_gap';
+type EvidenceCategory = 'all' | 'bias' | 'methodology' | 'reproducibility' | 'statistics';
 
-export default function EvidenceVisualization({
+function EvidenceVisualization({
   evidenceTraces = [],
   pdfContent,
   onEvidenceClick,
@@ -41,11 +41,8 @@ export default function EvidenceVisualization({
   selectedEvidence: externalSelectedEvidence
 }: EvidenceVisualizationProps) {
   const [internalSelectedCategory, setInternalSelectedCategory] = useState<EvidenceCategory>('all');
-
-  // Use external category if provided, otherwise use internal state
   const selectedCategory = (externalSelectedCategory as EvidenceCategory) || internalSelectedCategory;
 
-  // Handler that updates both internal and external state
   const handleCategoryChange = (category: EvidenceCategory) => {
     setInternalSelectedCategory(category);
     if (onCategoryChange) {
@@ -58,12 +55,10 @@ export default function EvidenceVisualization({
   const pdfViewerRef = useRef<HTMLIFrameElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
 
-  // Filter evidence by category
   const filteredEvidence = selectedCategory === 'all'
-    ? evidenceTraces
-    : evidenceTraces.filter(e => e.category === selectedCategory);
+    ? evidenceTraces.filter(e => e.category !== 'research_gap')
+    : evidenceTraces.filter(e => e.category === selectedCategory && e.category !== 'research_gap');
 
-  // Group evidence by page
   const evidenceByPage = filteredEvidence.reduce((acc, evidence) => {
     const page = evidence.page_number || 0;
     if (!acc[page]) acc[page] = [];
@@ -76,21 +71,13 @@ export default function EvidenceVisualization({
     if (onEvidenceClick) {
       onEvidenceClick(evidence);
     }
-    // Scroll to the page in PDF viewer if possible
-    if (evidence.page_number) {
-      // This will be handled by the parent component
-    }
   };
 
   const handleExportScreenshot = useCallback(async () => {
     if (!selectedEvidence || !pdfContent) return;
-
     try {
-      // Create a canvas to capture the evidence area
       const canvas = canvasRef.current;
       if (!canvas) return;
-
-      // For now, create a simple text-based export
       const exportData = {
         evidence: selectedEvidence,
         timestamp: new Date().toISOString(),
@@ -98,7 +85,6 @@ export default function EvidenceVisualization({
         page: selectedEvidence.page_number,
         rationale: selectedEvidence.rationale
       };
-
       const blob = new Blob([JSON.stringify(exportData, null, 2)], { type: 'application/json' });
       const url = URL.createObjectURL(blob);
       const link = document.createElement('a');
@@ -114,10 +100,11 @@ export default function EvidenceVisualization({
   }, [selectedEvidence, pdfContent]);
 
   const handleExportAll = useCallback(() => {
+    const filteredTraces = evidenceTraces.filter(e => e.category !== 'research_gap');
     const exportData = {
-      evidence: evidenceTraces,
+      evidence: filteredTraces,
       timestamp: new Date().toISOString(),
-      total_count: evidenceTraces.length
+      total_count: filteredTraces.length
     };
     const blob = new Blob([JSON.stringify(exportData, null, 2)], { type: 'application/json' });
     const url = URL.createObjectURL(blob);
@@ -130,7 +117,6 @@ export default function EvidenceVisualization({
     URL.revokeObjectURL(url);
   }, [evidenceTraces]);
 
-  // Expose export functions to parent
   useEffect(() => {
     if (onExportFunctionsReady) {
       onExportFunctionsReady({
@@ -150,8 +136,6 @@ export default function EvidenceVisualization({
         return 'bg-green-100 text-green-800 border-green-300';
       case 'statistics':
         return 'bg-purple-100 text-purple-800 border-purple-300';
-      case 'research_gap':
-        return 'bg-yellow-100 text-yellow-800 border-yellow-300';
       default:
         return 'bg-gray-100 text-gray-800 border-gray-300';
     }
@@ -186,7 +170,6 @@ export default function EvidenceVisualization({
 
   return (
     <div className="bg-white/90 backdrop-blur-sm rounded-2xl shadow-lg border border-gray-200/50 overflow-hidden">
-      {/* Header */}
       <div className="bg-gradient-to-r from-gray-50 to-gray-100 px-6 py-4 border-b border-gray-200">
         <div className="flex items-center justify-between">
           <div>
@@ -198,11 +181,10 @@ export default function EvidenceVisualization({
         </div>
       </div>
 
-      {/* Category Filter */}
       <div className="px-6 py-4 border-b border-gray-200 bg-gray-50">
         <div className="flex items-center space-x-2 flex-wrap gap-2">
           <span className="text-sm font-medium text-gray-700">Filter:</span>
-          {(['all', 'bias', 'methodology', 'reproducibility', 'statistics', 'research_gap'] as EvidenceCategory[]).map((category) => (
+          {(['all', 'bias', 'methodology', 'reproducibility', 'statistics'] as EvidenceCategory[]).map((category) => (
             <button
               key={category}
               onClick={() => handleCategoryChange(category)}
@@ -212,7 +194,7 @@ export default function EvidenceVisualization({
                   : 'bg-white text-gray-700 hover:bg-gray-100 border border-gray-300'
               }`}
             >
-              {category === 'research_gap' ? 'Research Gaps' : category.charAt(0).toUpperCase() + category.slice(1)}
+              {category.charAt(0).toUpperCase() + category.slice(1)}
               {category !== 'all' && (
                 <span className="ml-1.5 px-1.5 py-0.5 bg-white/20 rounded text-xs">
                   {evidenceTraces.filter(e => e.category === category).length}
@@ -224,7 +206,6 @@ export default function EvidenceVisualization({
       </div>
 
       <div className="flex h-[600px]">
-        {/* Evidence List */}
         <div className="w-1/3 border-r border-gray-200 overflow-y-auto">
           <div className="p-4 space-y-3">
             {Object.entries(evidenceByPage)
@@ -277,7 +258,6 @@ export default function EvidenceVisualization({
           </div>
         </div>
 
-        {/* Evidence Details */}
         <div className="flex-1 overflow-y-auto bg-gray-50">
           {selectedEvidence ? (
             <div className="p-6">
@@ -349,9 +329,9 @@ export default function EvidenceVisualization({
         </div>
       </div>
 
-      {/* Hidden canvas for export */}
       <canvas ref={canvasRef} className="hidden" />
     </div>
   );
 }
 
+export default EvidenceVisualization;

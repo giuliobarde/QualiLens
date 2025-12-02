@@ -195,10 +195,15 @@ class EvidenceCollector:
                 "height": 0.15
             }
         
+        # Don't truncate here - let the tools handle truncation at sentence boundaries
+        # Only apply a very generous limit to prevent memory issues (5000 chars)
+        max_snippet_length = 5000
+        final_snippet = text_snippet[:max_snippet_length] if len(text_snippet) > max_snippet_length else text_snippet
+        
         evidence = EvidenceItem(
             id=evidence_id,
             category=category,
-            text_snippet=text_snippet[:500],  # Limit snippet length
+            text_snippet=final_snippet,
             rationale=rationale,
             page_number=page_number,
             bounding_box=bounding_box,

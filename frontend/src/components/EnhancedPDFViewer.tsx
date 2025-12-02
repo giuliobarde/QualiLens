@@ -47,8 +47,6 @@ const getCategoryColor = (category: string): { fill: string; stroke: string } =>
       return { fill: 'rgba(34, 197, 94, 0.3)', stroke: '#22c55e' }; // green
     case 'statistics':
       return { fill: 'rgba(168, 85, 247, 0.3)', stroke: '#a855f7' }; // purple
-    case 'research_gap':
-      return { fill: 'rgba(234, 179, 8, 0.4)', stroke: '#eab308' }; // yellow
     default:
       return { fill: 'rgba(156, 163, 175, 0.3)', stroke: '#9ca3af' }; // gray
   }
@@ -76,7 +74,7 @@ export default function EnhancedPDFViewer({
   const [hoveredEvidence, setHoveredEvidence] = useState<EvidenceItem | null>(null);
   const [hoverPosition, setHoverPosition] = useState<{ x: number; y: number } | null>(null);
   const [showHighlights, setShowHighlights] = useState<boolean>(true); // Default: highlights visible
-  const [enabledCategories, setEnabledCategories] = useState<Set<string>>(new Set(['bias', 'methodology', 'reproducibility', 'statistics', 'research_gap'])); // All categories enabled by default
+  const [enabledCategories, setEnabledCategories] = useState<Set<string>>(new Set(['bias', 'methodology', 'reproducibility', 'statistics'])); // All categories enabled by default
   const [isExporting, setIsExporting] = useState<boolean>(false);
   const pageRenderingRef = useRef<Set<number>>(new Set());
   const lastScrolledEvidenceIdRef = useRef<string | null>(null);
@@ -725,7 +723,8 @@ export default function EnhancedPDFViewer({
       const pdfBytes = await pdfDoc.save();
       
       // Create blob and download
-      const blob = new Blob([pdfBytes], { type: 'application/pdf' });
+      // Convert to Uint8Array with ArrayBuffer to satisfy Blob type requirements
+      const blob = new Blob([new Uint8Array(pdfBytes)], { type: 'application/pdf' });
       const url = URL.createObjectURL(blob);
       const link = document.createElement('a');
       const timestamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, -5);
@@ -893,10 +892,10 @@ export default function EnhancedPDFViewer({
         <div className="bg-blue-50 border-b border-blue-200 px-4 py-2 flex items-center space-x-4 text-xs flex-wrap gap-2">
           <span className="font-semibold text-gray-700">Evidence Highlights:</span>
           
-          {(['bias', 'methodology', 'reproducibility', 'statistics', 'research_gap'] as const).map((category) => {
+          {(['bias', 'methodology', 'reproducibility', 'statistics'] as const).map((category) => {
             const isEnabled = enabledCategories.has(category);
             const categoryCount = evidenceTraces.filter(e => e.category === category).length;
-            const categoryLabel = category === 'research_gap' ? 'Research Gaps' : category.charAt(0).toUpperCase() + category.slice(1);
+            const categoryLabel = category.charAt(0).toUpperCase() + category.slice(1);
             
             return (
               <button

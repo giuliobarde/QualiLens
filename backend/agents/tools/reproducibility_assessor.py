@@ -6,6 +6,7 @@ This tool evaluates the reproducibility of research studies.
 
 import logging
 import json
+import re
 from typing import Dict, Any, Optional, List
 from .base_tool import BaseTool, ToolMetadata
 
@@ -17,6 +18,58 @@ sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(
 from LLM.openai_client import OpenAIClient
 
 logger = logging.getLogger(__name__)
+
+
+def _find_word_boundary(text: str, position: int, direction: str = 'backward') -> int:
+    """Find the nearest word boundary from a position."""
+    if direction == 'backward':
+        for i in range(position, max(0, position - 50), -1):
+            if i == 0 or (i > 0 and text[i-1] in ' \n\t.,;:!?'):
+                if i < len(text) and text[i] not in ' \n\t.,;:!?':
+                    return i
+        return max(0, position - 50)
+    else:
+        for i in range(position, min(len(text), position + 50)):
+            if i < len(text) and text[i] in ' \n\t.,;:!?':
+                return i
+        return min(len(text), position + 50)
+
+
+def _find_sentence_boundary(text: str, max_length: int) -> int:
+    """Find the nearest sentence boundary before max_length."""
+    if len(text) <= max_length:
+        return len(text)
+    
+    search_start = max(0, max_length - 200)
+    search_end = min(len(text), max_length + 50)
+    search_text = text[search_start:search_end]
+    
+    best_pos = max_length
+    for pattern in [r'\.\s+', r'!\s+', r'\?\s+', r'\.\n', r'!\n', r'\?\n']:
+        matches = list(re.finditer(pattern, search_text))
+        if matches:
+            for match in reversed(matches):
+                pos = search_start + match.end()
+                if pos <= max_length and pos > best_pos - 100:
+                    best_pos = pos
+                    break
+    
+    if best_pos < max_length and best_pos > max_length - 200:
+        return best_pos
+    
+    return _find_word_boundary(text, max_length, 'backward')
+
+
+def _truncate_at_sentence_boundary(text: str, max_length: int) -> str:
+    """Truncate text at a sentence boundary."""
+    if len(text) <= max_length:
+        return text
+    
+    truncate_pos = _find_sentence_boundary(text, max_length)
+    truncated = text[:truncate_pos].strip()
+    truncated = re.sub(r'[.,;:]\s*$', '', truncated)
+    
+    return truncated
 
 
 class ReproducibilityAssessorTool(BaseTool):
@@ -141,13 +194,18 @@ class ReproducibilityAssessorTool(BaseTool):
 
                     full_rationale = " | ".join(rationale_parts)
 
-                    # Determine snippet length
-                    max_snippet_length = 1500 if practice.get("full_section_text") else 400
-                    text_to_add = evidence_text[:max_snippet_length] if evidence_text else practice.get("description", "")[:400]
-
-                    if evidence_text and len(evidence_text) > max_snippet_length:
-                        text_to_add = text_to_add + "... [truncated for display]"
-                        logger.info(f"   ⚠️  Evidence text truncated from {len(evidence_text)} to {max_snippet_length} chars for practice {idx+1}")
+                    # Determine snippet length - truncate at sentence boundary
+                    max_snippet_length = 2000 if practice.get("full_section_text") else 600
+                    
+                    if evidence_text:
+                        if len(evidence_text) > max_snippet_length:
+                            text_to_add = _truncate_at_sentence_boundary(evidence_text, max_snippet_length)
+                            logger.info(f"   ⚠️  Evidence text truncated from {len(evidence_text)} to {len(text_to_add)} chars (at sentence boundary) for practice {idx+1}")
+                        else:
+                            text_to_add = evidence_text
+                    else:
+                        description = practice.get("description", "")
+                        text_to_add = _truncate_at_sentence_boundary(description, 600) if description else ""
 
                     evidence_id = evidence_collector.add_evidence(
                         category="reproducibility",
@@ -205,13 +263,18 @@ class ReproducibilityAssessorTool(BaseTool):
 
                     full_rationale = " | ".join(rationale_parts)
 
-                    # Determine snippet length
-                    max_snippet_length = 1500 if practice.get("full_section_text") else 400
-                    text_to_add = evidence_text[:max_snippet_length] if evidence_text else practice.get("description", "")[:400]
-
-                    if evidence_text and len(evidence_text) > max_snippet_length:
-                        text_to_add = text_to_add + "... [truncated for display]"
-                        logger.info(f"   ⚠️  Evidence text truncated from {len(evidence_text)} to {max_snippet_length} chars for barrier {idx+1}")
+                    # Determine snippet length - truncate at sentence boundary
+                    max_snippet_length = 2000 if practice.get("full_section_text") else 600
+                    
+                    if evidence_text:
+                        if len(evidence_text) > max_snippet_length:
+                            text_to_add = _truncate_at_sentence_boundary(evidence_text, max_snippet_length)
+                            logger.info(f"   ⚠️  Evidence text truncated from {len(evidence_text)} to {len(text_to_add)} chars (at sentence boundary) for barrier {idx+1}")
+                        else:
+                            text_to_add = evidence_text
+                    else:
+                        description = practice.get("description", "")
+                        text_to_add = _truncate_at_sentence_boundary(description, 600) if description else ""
 
                     evidence_id = evidence_collector.add_evidence(
                         category="reproducibility",
