@@ -180,13 +180,13 @@ class BiasDetectionTool(BaseTool):
                     severity = bias.get("severity", "medium")
                     if severity == "high":
                         score_impact = -25.0
-                        confidence = 0.85
+                        default_confidence = 0.85
                     elif severity == "medium":
                         score_impact = -12.0
-                        confidence = 0.70
+                        default_confidence = 0.70
                     else:
                         score_impact = -6.0
-                        confidence = 0.60
+                        default_confidence = 0.60
 
                     # Additional penalty for critical bias types
                     bias_type = bias.get("bias_type", "").lower()
@@ -200,7 +200,21 @@ class BiasDetectionTool(BaseTool):
                     verification_reasoning = bias.get("verification_reasoning", "")
                     why_bias = bias.get("why_bias_not_limitation", "")
                     impact = bias.get("impact", "")
-                    confidence_val = bias.get("confidence_percentage", 0)
+                    
+                    # CRITICAL FIX: Use consistent confidence value
+                    # Get confidence from LLM response (as percentage 0-100) or use default
+                    confidence_val_percentage = bias.get("confidence_percentage", 0)
+                    
+                    # Convert percentage to decimal (0-1) if available, otherwise use default
+                    if confidence_val_percentage and confidence_val_percentage > 0:
+                        # Convert from percentage (0-100) to decimal (0-1)
+                        confidence = confidence_val_percentage / 100.0
+                        # Ensure it's within valid range
+                        confidence = max(0.0, min(1.0, confidence))
+                    else:
+                        # Use severity-based default
+                        confidence = default_confidence
+                        confidence_val_percentage = int(confidence * 100)
 
                     # Construct detailed rationale that explains why/why not this is a bias
                     rationale_parts = [f"🔍 BIAS DETECTED: {bias_type.replace('_', ' ').title()} in section: {section_name}"]
@@ -214,8 +228,10 @@ class BiasDetectionTool(BaseTool):
                     if impact:
                         rationale_parts.append(f"\n💥 IMPACT ON STUDY VALIDITY:\n{impact}")
 
-                    if confidence_val:
-                        rationale_parts.append(f"\n📊 Confidence Level: {confidence_val}%")
+                    # Use the same confidence value in rationale (as percentage for display)
+                    # Only include if confidence is meaningful (> 0)
+                    if confidence_val_percentage > 0:
+                        rationale_parts.append(f"\n📊 Confidence Level: {confidence_val_percentage}%")
 
                     full_rationale = "\n".join(rationale_parts)
 
@@ -245,36 +261,90 @@ class BiasDetectionTool(BaseTool):
                 logger.info(f"📊 Collecting evidence for {len(limitations)} study limitations")
                 
                 for idx, limitation in enumerate(limitations):
+                    # Handle both string format (backward compatibility) and object format
                     if isinstance(limitation, str) and len(limitation) > 30:
-                        # Try to find this limitation in the paper
-                        limitation_snippet = self._find_limitation_text(text_content, limitation)
-                        evidence_collector.add_evidence(
-                            category="bias",
-                            text_snippet=limitation_snippet[:500] if limitation_snippet else limitation[:500],
-                            rationale=f"Study Limitation: {limitation}. This represents a constraint or weakness in the study design that may affect the interpretation or generalizability of the findings, but is not necessarily a systematic bias.",
-                            confidence=0.7,
-                            severity="low",
-                            score_impact=-2.0
-                        )
-                        logger.info(f"✅ Added limitation evidence {idx+1}/{len(limitations)}")
+                        limitation_text = limitation
+                        limitation_impact = "This represents a constraint or weakness in the study design that may affect the interpretation or generalizability of the findings, but is not necessarily a systematic bias."
+                        # Default confidence for string format
+                        confidence_percentage = 70
+                    elif isinstance(limitation, dict):
+                        limitation_text = limitation.get("description", "")
+                        limitation_impact = limitation.get("impact", "This represents a constraint or weakness in the study design that may affect the interpretation or generalizability of the findings, but is not necessarily a systematic bias.")
+                        # Use AI-generated confidence, fallback to 70% if not provided
+                        confidence_percentage = limitation.get("confidence_percentage", 70)
+                    else:
+                        continue
+                    
+                    if not limitation_text or len(limitation_text) < 30:
+                        continue
+                    
+                    # Try to find this limitation in the paper
+                    limitation_snippet = self._find_limitation_text(text_content, limitation_text)
+                    
+                    # Convert percentage to decimal (0-1)
+                    confidence = max(0.0, min(1.0, confidence_percentage / 100.0))
+                    
+                    # Build structured rationale consistent with bias format
+                    rationale_parts = [f"🔍 STUDY LIMITATION DETECTED"]
+                    rationale_parts.append(f"\n📋 LIMITATION DESCRIPTION:\n{limitation_text}")
+                    rationale_parts.append(f"\n💡 IMPACT ON STUDY VALIDITY:\n{limitation_impact}")
+                    rationale_parts.append(f"\n📊 Confidence Level: {confidence_percentage}%")
+                    full_rationale = "\n".join(rationale_parts)
+                    
+                    evidence_collector.add_evidence(
+                        category="bias",
+                        text_snippet=limitation_snippet[:500] if limitation_snippet else limitation_text[:500],
+                        rationale=full_rationale[:2000],
+                        confidence=confidence,
+                        severity="low",
+                        score_impact=-2.0
+                    )
+                    logger.info(f"✅ Added limitation evidence {idx+1}/{len(limitations)} (confidence: {confidence_percentage}%)")
                 
                 # Collect evidence from confounding factors
                 confounding_factors = bias_analysis.get("confounding_factors", [])
                 logger.info(f"📊 Collecting evidence for {len(confounding_factors)} confounding factors")
                 
                 for idx, confounder in enumerate(confounding_factors):
+                    # Handle both string format (backward compatibility) and object format
                     if isinstance(confounder, str) and len(confounder) > 30:
-                        # Try to find this confounder in the paper
-                        confounder_snippet = self._find_limitation_text(text_content, confounder)
-                        evidence_collector.add_evidence(
-                            category="bias",
-                            text_snippet=confounder_snippet[:500] if confounder_snippet else confounder[:500],
-                            rationale=f"Confounding Factor: {confounder}. This represents a variable that may be associated with both the exposure and outcome, potentially distorting the true relationship. This is important for peer reviewers to verify whether confounding was adequately controlled.",
-                            confidence=0.75,
-                            severity="medium",
-                            score_impact=-8.0
-                        )
-                        logger.info(f"✅ Added confounding factor evidence {idx+1}/{len(confounding_factors)}")
+                        confounder_text = confounder
+                        confounder_impact = "This represents a variable that may be associated with both the exposure and outcome, potentially distorting the true relationship. This is important for peer reviewers to verify whether confounding was adequately controlled."
+                        # Default confidence for string format
+                        confidence_percentage = 75
+                    elif isinstance(confounder, dict):
+                        confounder_text = confounder.get("description", "")
+                        confounder_impact = confounder.get("impact", "This represents a variable that may be associated with both the exposure and outcome, potentially distorting the true relationship. This is important for peer reviewers to verify whether confounding was adequately controlled.")
+                        # Use AI-generated confidence, fallback to 75% if not provided
+                        confidence_percentage = confounder.get("confidence_percentage", 75)
+                    else:
+                        continue
+                    
+                    if not confounder_text or len(confounder_text) < 30:
+                        continue
+                    
+                    # Try to find this confounder in the paper
+                    confounder_snippet = self._find_limitation_text(text_content, confounder_text)
+                    
+                    # Convert percentage to decimal (0-1)
+                    confidence = max(0.0, min(1.0, confidence_percentage / 100.0))
+                    
+                    # Build structured rationale consistent with bias format
+                    rationale_parts = [f"🔍 CONFOUNDING FACTOR DETECTED"]
+                    rationale_parts.append(f"\n📋 CONFOUNDER DESCRIPTION:\n{confounder_text}")
+                    rationale_parts.append(f"\n💥 IMPACT ON STUDY VALIDITY:\n{confounder_impact}")
+                    rationale_parts.append(f"\n📊 Confidence Level: {confidence_percentage}%")
+                    full_rationale = "\n".join(rationale_parts)
+                    
+                    evidence_collector.add_evidence(
+                        category="bias",
+                        text_snippet=confounder_snippet[:500] if confounder_snippet else confounder_text[:500],
+                        rationale=full_rationale[:2000],
+                        confidence=confidence,
+                        severity="medium",
+                        score_impact=-8.0
+                    )
+                    logger.info(f"✅ Added confounding factor evidence {idx+1}/{len(confounding_factors)} (confidence: {confidence_percentage}%)")
                 
                 logger.info(f"✅ Bias evidence collection complete. Total biases: {len(detected_biases)}, Limitations: {len(limitations)}, Confounders: {len(confounding_factors)}")
             
@@ -458,6 +528,11 @@ For EACH bias you find, provide:
 7. impact: How this affects study validity
 8. confidence_percentage: 70-100 (be confident if pattern matches or explicit)
 
+For EACH limitation and confounding factor, provide:
+- description: Clear description of the limitation/confounder
+- impact: How this affects study validity
+- confidence_percentage: 60-90 (provide appropriate confidence based on how clearly stated it is in the paper)
+
 Return ONLY valid JSON in this exact format:
 {{
   "detected_biases": [
@@ -473,8 +548,20 @@ Return ONLY valid JSON in this exact format:
     }}
   ],
   "bias_summary": "Overall summary of all detected biases",
-  "limitations": ["Study limitations that are not biases"],
-  "confounding_factors": ["Uncontrolled variables"],
+  "limitations": [
+    {{
+      "description": "Study limitation description",
+      "impact": "How this affects study validity",
+      "confidence_percentage": 70
+    }}
+  ],
+  "confounding_factors": [
+    {{
+      "description": "Confounding factor description",
+      "impact": "How this affects study validity",
+      "confidence_percentage": 75
+    }}
+  ],
   "severity_scores": {{
     "selection_bias": "none | low | medium | high",
     "measurement_bias": "none | low | medium | high",

@@ -77,106 +77,104 @@ class EvidenceCollector:
         evidence_id = f"evidence_{self._evidence_counter}"
         self._evidence_counter += 1
         
-        # Try to detect page number and find actual location if not provided
-        if page_number is None and self.pdf_pages:
-            page_number = self._detect_page_number(text_snippet)
+        # CRITICAL FIX: When we have coordinate data, always search all pages first
+        # This is more accurate than text-based page detection which can give false positives
+        # Store the original page_number for logging purposes
+        original_page_number = page_number
         
         # Try to find actual bounding box using coordinate data
-        # This might also help us find the correct page number
+        # This is the most accurate method and will also determine the correct page number
         if bounding_box is None:
             if self.pages_with_coords and len(self.pages_with_coords) > 0:
-                # If we don't have a page number, try to find it by searching all pages
-                if page_number is None:
-                    # Search all pages for the text and find the best match
-                    best_page = None
-                    best_bbox = None
-                    best_score = 0
-                    
-                    for page_coord in self.pages_with_coords:
-                        test_page_num = page_coord.get("page_num")
-                        test_bbox = self._find_text_location(text_snippet, test_page_num)
-                        if test_bbox:
-                            # Calculate match quality (prefer pages with better text matches)
-                            text_blocks = page_coord.get("text_blocks", [])
-                            snippet_normalized = re.sub(r'\s+', ' ', text_snippet.strip().lower())
-                            match_score = 0
+                # Always search all pages when we have coordinate data - this is more accurate
+                # than text-based page detection which can match on wrong pages
+                best_page = None
+                best_bbox = None
+                best_score = 0
+                
+                # Search all pages for the text and find the best match
+                # CRITICAL: Only accept high-quality matches to avoid false positives
+                logger.debug(f"🔍 Searching all {len(self.pages_with_coords)} pages for evidence {evidence_id} with snippet: {text_snippet[:100]}...")
+                for page_coord in self.pages_with_coords:
+                    test_page_num = page_coord.get("page_num")
+                    test_bbox = self._find_text_location(text_snippet, test_page_num)
+                    if test_bbox:
+                        logger.debug(f"  📄 Page {test_page_num}: Found potential match, calculating quality...")
+                        # Calculate match quality (prefer pages with better text matches)
+                        text_blocks = page_coord.get("text_blocks", [])
+                        snippet_normalized = re.sub(r'\s+', ' ', text_snippet.strip().lower())
+                        match_score = 0
+                        is_exact_match = False
+                        
+                        for block in text_blocks:
+                            block_text = block.get("text", "").lower()
+                            block_normalized = re.sub(r'\s+', ' ', block_text.strip())
                             
-                            for block in text_blocks:
-                                block_text = block.get("text", "").lower()
-                                if snippet_normalized in block_text or block_text in snippet_normalized:
-                                    match_score = 1.0
-                                    break
-                                # Calculate word overlap
-                                block_words = [w for w in block_text.split() if len(w) > 2]
-                                snippet_words = [w for w in snippet_normalized.split() if len(w) > 2]
-                                if len(block_words) > 0 and len(snippet_words) > 0:
-                                    matching_words = sum(1 for word in snippet_words if word in block_words)
-                                    word_score = matching_words / max(len(snippet_words), len(block_words))
-                                    match_score = max(match_score, word_score)
-                            
-                            if match_score > best_score:
-                                best_score = match_score
-                                best_page = test_page_num
-                                best_bbox = test_bbox
-                    
-                    if best_page and best_bbox:
-                        page_number = best_page
-                        bounding_box = best_bbox
-                        logger.info(f"✅ Found text location for evidence {evidence_id} on page {best_page} (match score: {best_score:.2f}) by searching all pages")
+                            # Exact substring match gets highest score
+                            if snippet_normalized in block_normalized:
+                                match_score = 1.0
+                                is_exact_match = True
+                                break
+                            # Check reverse (block in snippet) - also exact match
+                            elif block_normalized in snippet_normalized and len(block_normalized) > 20:
+                                match_score = 0.95
+                                is_exact_match = True
+                                break
+                            # Calculate word overlap for fuzzy matching
+                            block_words = [w for w in block_normalized.split() if len(w) > 2]
+                            snippet_words = [w for w in snippet_normalized.split() if len(w) > 2]
+                            if len(block_words) > 0 and len(snippet_words) > 0:
+                                matching_words = sum(1 for word in snippet_words if word in block_words)
+                                word_score = matching_words / max(len(snippet_words), len(block_words))
+                                match_score = max(match_score, word_score)
+                        
+                        # CRITICAL: Only accept matches with at least 80% quality
+                        # Prefer exact matches over fuzzy matches
+                        # If we have an exact match, use it immediately (don't search further)
+                        if is_exact_match:
+                            logger.info(f"✅ Found EXACT match for evidence {evidence_id} on page {test_page_num}, using this page")
+                            best_page = test_page_num
+                            best_bbox = test_bbox
+                            best_score = 1.0
+                            break  # Stop searching - we found the exact page
+                        elif match_score >= 0.8 and match_score > best_score:
+                            # Only update if this is a better fuzzy match
+                            logger.debug(f"  📄 Page {test_page_num}: Good fuzzy match (score: {match_score:.2f}), updating best match")
+                            best_score = match_score
+                            best_page = test_page_num
+                            best_bbox = test_bbox
+                        else:
+                            logger.debug(f"  📄 Page {test_page_num}: Match found but quality too low (score: {match_score:.2f} < 0.8 or not better than current best: {best_score:.2f})")
+                
+                # Only accept matches with at least 80% quality to avoid false positives
+                if best_page and best_bbox and best_score >= 0.8:
+                    # Update page_number to the correct page found via coordinate search
+                    if original_page_number and original_page_number != best_page:
+                        logger.info(f"✅ Found text location for evidence {evidence_id} on page {best_page} (match score: {best_score:.2f}, was incorrectly assigned to page {original_page_number})")
                     else:
-                        # Couldn't find on any page, use estimate
+                        logger.info(f"✅ Found text location for evidence {evidence_id} on page {best_page} (match score: {best_score:.2f})")
+                    page_number = best_page
+                    bounding_box = best_bbox
+                else:
+                    # No good match found (either no match or quality too low)
+                    if best_page and best_bbox:
+                        logger.warning(f"⚠️ Found text on page {best_page} but match quality ({best_score:.2f}) is too low (< 0.8) for evidence {evidence_id}, trying fallback")
+                    # Couldn't find on any page using coordinate data
+                    # Fall back to text-based page detection if we don't have a page number
+                    if page_number is None and self.pdf_pages:
+                        page_number = self._detect_page_number(text_snippet)
+                    
+                    if page_number is None:
                         page_number = 1
                         logger.warning(f"⚠️ Could not detect page number for evidence {evidence_id}, defaulting to page 1")
-                        bounding_box = self._estimate_bounding_box(text_snippet, page_number)
-                else:
-                    # We have a page number, try to find location on that page
-                    bounding_box = self._find_text_location(text_snippet, page_number)
-                    if bounding_box:
-                        logger.info(f"✅ Found text location for evidence {evidence_id} on page {page_number}")
                     else:
-                        # Try searching other pages if not found on specified page
-                        logger.warning(f"⚠️ Could not find text on page {page_number}, searching other pages...")
-                        best_page = None
-                        best_bbox = None
-                        best_score = 0
-                        
-                        for page_coord in self.pages_with_coords:
-                            test_page_num = page_coord.get("page_num")
-                            if test_page_num != page_number:
-                                test_bbox = self._find_text_location(text_snippet, test_page_num)
-                                if test_bbox:
-                                    # Calculate match quality
-                                    text_blocks = page_coord.get("text_blocks", [])
-                                    snippet_normalized = re.sub(r'\s+', ' ', text_snippet.strip().lower())
-                                    match_score = 0
-                                    
-                                    for block in text_blocks:
-                                        block_text = block.get("text", "").lower()
-                                        if snippet_normalized in block_text or block_text in snippet_normalized:
-                                            match_score = 1.0
-                                            break
-                                        # Calculate word overlap
-                                        block_words = [w for w in block_text.split() if len(w) > 2]
-                                        snippet_words = [w for w in snippet_normalized.split() if len(w) > 2]
-                                        if len(block_words) > 0 and len(snippet_words) > 0:
-                                            matching_words = sum(1 for word in snippet_words if word in block_words)
-                                            word_score = matching_words / max(len(snippet_words), len(block_words))
-                                            match_score = max(match_score, word_score)
-                                    
-                                    if match_score > best_score:
-                                        best_score = match_score
-                                        best_page = test_page_num
-                                        best_bbox = test_bbox
-                        
-                        if best_page and best_bbox:
-                            page_number = best_page
-                            bounding_box = best_bbox
-                            logger.info(f"✅ Found text location for evidence {evidence_id} on page {best_page} (match score: {best_score:.2f}, was incorrectly assigned to page {page_number})")
-                        else:
-                            logger.warning(f"⚠️ Could not find text location on any page, using estimate for evidence {evidence_id}")
-                            bounding_box = self._estimate_bounding_box(text_snippet, page_number)
+                        logger.warning(f"⚠️ Could not find text location using coordinate data for evidence {evidence_id}, using estimated bbox on page {page_number}")
+                    bounding_box = self._estimate_bounding_box(text_snippet, page_number)
             else:
-                # No coordinate data available
+                # No coordinate data available - use text-based page detection
+                if page_number is None and self.pdf_pages:
+                    page_number = self._detect_page_number(text_snippet)
+                
                 if page_number is None:
                     page_number = 1
                     logger.warning(f"⚠️ Could not detect page number for evidence {evidence_id}, defaulting to page 1")
@@ -276,11 +274,13 @@ class EvidenceCollector:
                             best_page = page_num
             
             # If we found a good match using coordinate data, use it
-            if best_page and best_score >= 0.5:
+            # Require at least 70% match for coordinate-based detection (more strict)
+            if best_page and best_score >= 0.7:
                 logger.debug(f"✅ Found best match (score: {best_score:.2f}) for snippet on page {best_page} using coordinate data")
                 return best_page
         
         # Fallback: search through page text
+        # This is less accurate than coordinate-based search, so be more strict
         best_page = None
         best_score = 0
         
@@ -292,23 +292,22 @@ class EvidenceCollector:
             
             # Check if snippet appears in this page
             if len(snippet_normalized) > 20:
-                # Use substring matching for longer snippets
-                if snippet_normalized[:100] in page_normalized:
-                    # Calculate how much of the snippet appears
+                # Use substring matching for longer snippets - prefer exact matches
+                if snippet_normalized in page_normalized:
+                    match_score = 1.0  # Full exact match - highest confidence
+                elif snippet_normalized[:100] in page_normalized:
+                    # Partial match - calculate how much of the snippet appears
                     snippet_len = len(snippet_normalized)
-                    if snippet_normalized in page_normalized:
-                        match_score = 1.0  # Full match
-                    else:
-                        # Partial match - calculate overlap
-                        matched_chars = 0
-                        for i in range(min(100, len(snippet_normalized))):
-                            if snippet_normalized[i] in page_normalized:
-                                matched_chars += 1
-                        match_score = matched_chars / snippet_len
+                    # Count how many characters of the snippet appear in the page
+                    matched_chars = 0
+                    for i in range(min(len(snippet_normalized), 200)):  # Check up to 200 chars
+                        if i < len(snippet_normalized) and snippet_normalized[i] in page_normalized:
+                            matched_chars += 1
+                    match_score = matched_chars / snippet_len
             else:
-                # For short snippets, check word overlap
+                # For short snippets, check word overlap - require high overlap
                 page_words = [w for w in page_normalized.split() if len(w) > 2]
-                if len(page_words) > 0:
+                if len(page_words) > 0 and len(snippet_words) > 0:
                     matching_words = sum(1 for word in snippet_words if word in page_words)
                     match_score = matching_words / max(len(snippet_words), len(page_words))
             
@@ -317,11 +316,14 @@ class EvidenceCollector:
                 best_score = match_score
                 best_page = idx + 1  # 1-indexed
         
-        # Only return if we have a reasonable match (at least 50% overlap)
-        if best_page and best_score >= 0.5:
+        # Require at least 70% match for text-based detection (more strict than before)
+        # This reduces false positives where text might appear on multiple pages
+        if best_page and best_score >= 0.7:
             logger.debug(f"✅ Found best match (score: {best_score:.2f}) for snippet on page {best_page} using text search")
             return best_page
         
+        # If no good match found, return None (don't guess)
+        logger.debug(f"⚠️ No good match found for snippet (best score: {best_score:.2f}), returning None")
         return None
     
     def _find_text_location(
