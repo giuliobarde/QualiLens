@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useRef, useEffect } from 'react';
+import { useState, useRef, useEffect, useCallback } from 'react';
 
 interface EvidenceItem {
   id: string;
@@ -25,6 +25,8 @@ interface EvidenceVisualizationProps {
   onEvidenceClick?: (evidence: EvidenceItem) => void;
   selectedCategory?: string;
   onCategoryChange?: (category: string) => void;
+  onExportFunctionsReady?: (functions: { exportSelected: () => void; exportAll: () => void }) => void;
+  selectedEvidence?: EvidenceItem | null;
 }
 
 type EvidenceCategory = 'all' | 'bias' | 'methodology' | 'reproducibility' | 'statistics' | 'research_gap';
@@ -34,7 +36,9 @@ export default function EvidenceVisualization({
   pdfContent,
   onEvidenceClick,
   selectedCategory: externalSelectedCategory,
-  onCategoryChange
+  onCategoryChange,
+  onExportFunctionsReady,
+  selectedEvidence: externalSelectedEvidence
 }: EvidenceVisualizationProps) {
   const [internalSelectedCategory, setInternalSelectedCategory] = useState<EvidenceCategory>('all');
 
@@ -48,7 +52,8 @@ export default function EvidenceVisualization({
       onCategoryChange(category);
     }
   };
-  const [selectedEvidence, setSelectedEvidence] = useState<EvidenceItem | null>(null);
+  const [internalSelectedEvidence, setInternalSelectedEvidence] = useState<EvidenceItem | null>(null);
+  const selectedEvidence = externalSelectedEvidence || internalSelectedEvidence;
   const [hoveredEvidenceId, setHoveredEvidenceId] = useState<string | null>(null);
   const pdfViewerRef = useRef<HTMLIFrameElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -67,7 +72,7 @@ export default function EvidenceVisualization({
   }, {} as Record<number, EvidenceItem[]>);
 
   const handleEvidenceClick = (evidence: EvidenceItem) => {
-    setSelectedEvidence(evidence);
+    setInternalSelectedEvidence(evidence);
     if (onEvidenceClick) {
       onEvidenceClick(evidence);
     }
@@ -77,7 +82,7 @@ export default function EvidenceVisualization({
     }
   };
 
-  const handleExportScreenshot = async () => {
+  const handleExportScreenshot = useCallback(async () => {
     if (!selectedEvidence || !pdfContent) return;
 
     try {
@@ -106,7 +111,34 @@ export default function EvidenceVisualization({
     } catch (error) {
       console.error('Failed to export evidence:', error);
     }
-  };
+  }, [selectedEvidence, pdfContent]);
+
+  const handleExportAll = useCallback(() => {
+    const exportData = {
+      evidence: evidenceTraces,
+      timestamp: new Date().toISOString(),
+      total_count: evidenceTraces.length
+    };
+    const blob = new Blob([JSON.stringify(exportData, null, 2)], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = `all-evidence-${Date.now()}.json`;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
+  }, [evidenceTraces]);
+
+  // Expose export functions to parent
+  useEffect(() => {
+    if (onExportFunctionsReady) {
+      onExportFunctionsReady({
+        exportSelected: handleExportScreenshot,
+        exportAll: handleExportAll
+      });
+    }
+  }, [onExportFunctionsReady, handleExportScreenshot, handleExportAll]);
 
   const getCategoryColor = (category: string) => {
     switch (category) {
@@ -163,17 +195,6 @@ export default function EvidenceVisualization({
               {filteredEvidence.length} evidence item{filteredEvidence.length !== 1 ? 's' : ''} found
             </p>
           </div>
-          {selectedEvidence && (
-            <button
-              onClick={handleExportScreenshot}
-              className="flex items-center space-x-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-all"
-            >
-              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
-              </svg>
-              <span>Export</span>
-            </button>
-          )}
         </div>
       </div>
 
@@ -313,18 +334,6 @@ export default function EvidenceVisualization({
                     </div>
                   )}
                 </div>
-
-                {selectedEvidence.bounding_box && (
-                  <div className="mt-4 p-4 bg-yellow-50 rounded-lg border border-yellow-200">
-                    <h4 className="text-sm font-semibold text-gray-700 mb-2">Location</h4>
-                    <div className="text-xs text-gray-600 space-y-1">
-                      <p>X: {(selectedEvidence.bounding_box.x * 100).toFixed(1)}%</p>
-                      <p>Y: {(selectedEvidence.bounding_box.y * 100).toFixed(1)}%</p>
-                      <p>Width: {(selectedEvidence.bounding_box.width * 100).toFixed(1)}%</p>
-                      <p>Height: {(selectedEvidence.bounding_box.height * 100).toFixed(1)}%</p>
-                    </div>
-                  </div>
-                )}
               </div>
             </div>
           ) : (

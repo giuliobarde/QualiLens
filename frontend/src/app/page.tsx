@@ -8,6 +8,7 @@ import ScrollableAnalysisSections from '@/components/ScrollableAnalysisSections'
 import EnhancedProgressBar from '@/components/EnhancedProgressBar';
 import CircularScoreDisplay from '@/components/CircularScoreDisplay';
 import EvidenceVisualization from '@/components/EvidenceVisualization';
+import ExportDropdown, { ExportOption } from '@/components/ExportDropdown';
 
 // Dynamically import PDF viewer to avoid SSR issues with PDF.js
 const PDFViewerWithHighlights = dynamic(
@@ -37,6 +38,15 @@ export default function Home() {
   const [selectedHighlightEvidence, setSelectedHighlightEvidence] = useState<any>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const dropZoneRef = useRef<HTMLDivElement>(null);
+  
+  // Export function refs from child components
+  const [pdfExportFunctions, setPdfExportFunctions] = useState<{ exportCurrentPage: () => void; exportAllPages: () => void } | null>(null);
+  const [evidenceExportFunctions, setEvidenceExportFunctions] = useState<{ exportSelected: () => void; exportAll: () => void } | null>(null);
+  const [analysisExportFunctions, setAnalysisExportFunctions] = useState<{ exportCSV: () => void; exportJSON: () => void } | null>(null);
+  
+  // Scroll direction tracking for sticky action bar
+  const [isActionBarVisible, setIsActionBarVisible] = useState(true);
+  const lastScrollY = useRef(0);
 
   // Cleanup object URLs on component unmount
   useEffect(() => {
@@ -46,6 +56,40 @@ export default function Home() {
       }
     };
   }, [pdfContent]);
+
+  // Handle scroll direction for sticky action bar
+  useEffect(() => {
+    const handleScroll = () => {
+      const currentScrollY = window.scrollY;
+      const scrollDifference = Math.abs(currentScrollY - lastScrollY.current);
+      
+      // Only update if scroll difference is significant (avoid jitter)
+      if (scrollDifference < 5) return;
+      
+      // Show bar when scrolling up, hide when scrolling down
+      if (currentScrollY < lastScrollY.current) {
+        // Scrolling up - always show
+        setIsActionBarVisible(true);
+      } else if (currentScrollY > lastScrollY.current) {
+        // Scrolling down - always hide (unless at very top)
+        if (currentScrollY > 50) {
+          setIsActionBarVisible(false);
+        }
+      }
+      
+      lastScrollY.current = currentScrollY;
+    };
+
+    // Only add scroll listener when analysis results are shown
+    if (analysisResult) {
+      window.addEventListener('scroll', handleScroll, { passive: true });
+      return () => window.removeEventListener('scroll', handleScroll);
+    } else {
+      // Reset visibility when no results
+      setIsActionBarVisible(true);
+      lastScrollY.current = 0;
+    }
+  }, [analysisResult]);
 
   // File selection handler
   const handleFileSelection = useCallback((file: File) => {
@@ -145,6 +189,98 @@ export default function Home() {
     link.click();
     document.body.removeChild(link);
     URL.revokeObjectURL(url);
+  };
+
+  // Get export options for the unified dropdown
+  const getExportOptions = (): ExportOption[] => {
+    const options: ExportOption[] = [];
+    
+    // Analysis Data Exports
+    if (analysisResult) {
+      options.push({
+        id: 'export-full-analysis-json',
+        label: 'Export Full Analysis (JSON)',
+        icon: (
+          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+          </svg>
+        ),
+        onClick: exportResults,
+        group: 'Analysis Data'
+      });
+    }
+    
+    if (analysisExportFunctions) {
+      options.push({
+        id: 'export-analysis-csv',
+        label: 'Export Analysis Sections (CSV)',
+        icon: (
+          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+          </svg>
+        ),
+        onClick: analysisExportFunctions.exportCSV,
+        disabled: !analysisResult,
+        group: 'Analysis Data'
+      });
+    }
+    
+    // PDF Screenshot Exports
+    if (pdfExportFunctions && analysisResult?.evidence_traces?.length > 0) {
+      options.push({
+        id: 'export-current-page',
+        label: 'Export Current Page (PNG)',
+        icon: (
+          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+          </svg>
+        ),
+        onClick: pdfExportFunctions.exportCurrentPage,
+        group: 'PDF Screenshots'
+      });
+      
+      options.push({
+        id: 'export-all-pages',
+        label: 'Export All Pages (PDF)',
+        icon: (
+          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2V6zM14 6a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2V6zM4 16a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2v-2zM14 16a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2v-2z" />
+          </svg>
+        ),
+        onClick: pdfExportFunctions.exportAllPages,
+        group: 'PDF Screenshots'
+      });
+    }
+    
+    // Evidence Exports
+    if (evidenceExportFunctions && analysisResult?.evidence_traces?.length > 0) {
+      options.push({
+        id: 'export-selected-evidence',
+        label: 'Export Selected Evidence (JSON)',
+        icon: (
+          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
+          </svg>
+        ),
+        onClick: evidenceExportFunctions.exportSelected,
+        disabled: !selectedHighlightEvidence,
+        group: 'Evidence Data'
+      });
+      
+      options.push({
+        id: 'export-all-evidence',
+        label: 'Export All Evidence (JSON)',
+        icon: (
+          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+          </svg>
+        ),
+        onClick: evidenceExportFunctions.exportAll,
+        group: 'Evidence Data'
+      });
+    }
+    
+    return options;
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -254,17 +390,6 @@ export default function Home() {
                 <p className="text-sm text-gray-600">AI-Powered Research Quality Analysis</p>
               </div>
             </div>
-            {analysisResult && (
-              <button
-                onClick={exportResults}
-                className="hidden sm:flex items-center space-x-2 px-4 py-2 bg-gradient-to-r from-blue-600 to-indigo-600 text-white rounded-lg hover:from-blue-700 hover:to-indigo-700 transition-all shadow-sm hover:shadow-md"
-              >
-                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
-                </svg>
-                <span>Export</span>
-              </button>
-            )}
           </div>
         </div>
       </div>
@@ -497,8 +622,10 @@ export default function Home() {
         ) : (
           /* Enhanced Results Display */
           <div className="space-y-6">
-            {/* Action Bar */}
-            <div className="bg-white/95 backdrop-blur-sm rounded-2xl shadow-md p-5 border border-gray-200/50">
+            {/* Action Bar - Sticky */}
+            <div className={`sticky top-20 z-40 bg-white/95 backdrop-blur-sm rounded-2xl shadow-md p-5 border border-gray-200/50 transition-transform duration-300 ease-in-out ${
+              isActionBarVisible ? 'translate-y-0' : '-translate-y-full'
+            }`}>
               <div className="flex items-center justify-between flex-wrap gap-4">
                 <div className="flex items-center space-x-3">
                   <div className="w-10 h-10 bg-green-100 rounded-xl flex items-center justify-center">
@@ -512,15 +639,10 @@ export default function Home() {
                   </div>
                 </div>
                 <div className="flex items-center space-x-3">
-                  <button
-                    onClick={exportResults}
-                    className="flex items-center space-x-2 px-4 py-2 bg-gray-100 hover:bg-gray-200 text-gray-700 rounded-lg transition-all shadow-sm hover:shadow"
-                  >
-                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
-                    </svg>
-                    <span className="hidden sm:inline">Export</span>
-                  </button>
+                  <ExportDropdown
+                    options={getExportOptions()}
+                    disabled={!analysisResult}
+                  />
                   <button
                     onClick={() => {
                       removeFile();
@@ -572,6 +694,7 @@ export default function Home() {
                           setSelectedHighlightEvidence(evidence);
                           setShowHighlightDetails(true);
                         }}
+                        onExportFunctionsReady={setPdfExportFunctions}
                           />
                         )}
                       </div>
@@ -588,7 +711,10 @@ export default function Home() {
 
               {/* Bottom Row: Analysis Sections - Full Width */}
               <div className="bg-white/95 backdrop-blur-sm rounded-2xl shadow-lg overflow-hidden border border-gray-200/50">
-                  <ScrollableAnalysisSections data={analysisResult} />
+                  <ScrollableAnalysisSections 
+                    data={analysisResult} 
+                    onExportFunctionsReady={setAnalysisExportFunctions}
+                  />
               </div>
             </div>
 
@@ -600,13 +726,16 @@ export default function Home() {
                   pdfContent={pdfContent}
                   selectedCategory={evidenceVisualizationFilter}
                   onCategoryChange={setEvidenceVisualizationFilter}
+                  selectedEvidence={selectedHighlightEvidence}
                   onEvidenceClick={(evidence) => {
                     setSelectedEvidenceId(evidence.id);
+                    setSelectedHighlightEvidence(evidence);
                     // Scroll to the page in PDF viewer
                     if (evidence.page_number) {
                       // The PDF viewer will handle scrolling
                     }
                   }}
+                  onExportFunctionsReady={setEvidenceExportFunctions}
                 />
               </div>
             ) : analysisResult && (
@@ -715,31 +844,6 @@ export default function Home() {
                         }`}>
                           {selectedHighlightEvidence.score_impact > 0 ? '+' : ''}{selectedHighlightEvidence.score_impact.toFixed(1)} points
                         </span>
-                      </div>
-                    </div>
-                  )}
-
-                  {/* Location Info */}
-                  {selectedHighlightEvidence.bounding_box && (
-                    <div className="bg-yellow-50 rounded-xl p-4 border border-yellow-200">
-                      <h4 className="text-sm font-semibold text-gray-700 mb-3 uppercase tracking-wide">Location in Document</h4>
-                      <div className="grid grid-cols-2 gap-3 text-sm">
-                        <div>
-                          <span className="text-gray-600">X Position:</span>
-                          <span className="ml-2 font-medium text-gray-800">{(selectedHighlightEvidence.bounding_box.x * 100).toFixed(1)}%</span>
-                        </div>
-                        <div>
-                          <span className="text-gray-600">Y Position:</span>
-                          <span className="ml-2 font-medium text-gray-800">{(selectedHighlightEvidence.bounding_box.y * 100).toFixed(1)}%</span>
-                        </div>
-                        <div>
-                          <span className="text-gray-600">Width:</span>
-                          <span className="ml-2 font-medium text-gray-800">{(selectedHighlightEvidence.bounding_box.width * 100).toFixed(1)}%</span>
-                        </div>
-                        <div>
-                          <span className="text-gray-600">Height:</span>
-                          <span className="ml-2 font-medium text-gray-800">{(selectedHighlightEvidence.bounding_box.height * 100).toFixed(1)}%</span>
-                        </div>
                       </div>
                     </div>
                   )}

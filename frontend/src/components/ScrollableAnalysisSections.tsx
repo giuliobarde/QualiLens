@@ -1,15 +1,16 @@
 'use client';
 
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import ErrorBoundary from './ErrorBoundary';
 import SafeRenderer from './SafeRenderer';
 
 interface ScrollableAnalysisSectionsProps {
   data: any;
   className?: string;
+  onExportFunctionsReady?: (functions: { exportCSV: () => void; exportJSON: () => void }) => void;
 }
 
-export default function ScrollableAnalysisSections({ data, className = '' }: ScrollableAnalysisSectionsProps) {
+export default function ScrollableAnalysisSections({ data, className = '', onExportFunctionsReady }: ScrollableAnalysisSectionsProps) {
   const [activeSection, setActiveSection] = useState('summary');
 
   // Helper function to escape CSV values
@@ -103,6 +104,16 @@ export default function ScrollableAnalysisSections({ data, className = '' }: Scr
     document.body.removeChild(link);
     URL.revokeObjectURL(url);
   };
+
+  // Expose export functions to parent
+  useEffect(() => {
+    if (onExportFunctionsReady) {
+      onExportFunctionsReady({
+        exportCSV: exportToCSV,
+        exportJSON: exportToJSON
+      });
+    }
+  }, [onExportFunctionsReady, data]);
 
   const sections = [
     { id: 'summary', label: 'Summary', icon: '📝', color: 'blue' },
@@ -981,28 +992,6 @@ export default function ScrollableAnalysisSections({ data, className = '' }: Scr
             </svg>
             Analysis Sections
           </h3>
-          <div className="flex gap-2">
-            <button
-              onClick={exportToCSV}
-              className="px-3 py-1.5 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors duration-200 flex items-center gap-1.5 text-xs font-medium"
-              title="Export metadata as CSV"
-            >
-              <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
-              </svg>
-              Export CSV
-            </button>
-            <button
-              onClick={exportToJSON}
-              className="px-3 py-1.5 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors duration-200 flex items-center gap-1.5 text-xs font-medium"
-              title="Export metadata as JSON"
-            >
-              <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
-              </svg>
-              Export JSON
-            </button>
-          </div>
         </div>
         <div className="grid grid-cols-2 gap-2">
           {sections.map((section) => (
