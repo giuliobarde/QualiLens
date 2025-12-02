@@ -774,6 +774,40 @@ export default function ScrollableAnalysisSections({ data, className = '', onExp
   );
 
   const renderGaps = () => {
+    // Helper function to normalize text for comparison
+    const normalizeText = (text: string): string => {
+      if (!text) return '';
+      return text.toLowerCase()
+        .replace(/[^\w\s]/g, '')
+        .replace(/\s+/g, ' ')
+        .trim();
+    };
+    
+    // Helper function to check if two gaps are similar
+    const areSimilar = (text1: string, text2: string): boolean => {
+      const norm1 = normalizeText(text1);
+      const norm2 = normalizeText(text2);
+      
+      // Check if one contains the other (for pattern vs expanded versions)
+      if (norm1.length > 20 && norm2.length > 20) {
+        if (norm1.includes(norm2) || norm2.includes(norm1)) {
+          return true;
+        }
+      }
+      
+      // Calculate word overlap
+      const words1 = new Set(norm1.split(' ').filter(w => w.length > 3));
+      const words2 = new Set(norm2.split(' ').filter(w => w.length > 3));
+      
+      if (words1.size === 0 || words2.size === 0) return false;
+      
+      const intersection = new Set([...words1].filter(w => words2.has(w)));
+      const union = new Set([...words1, ...words2]);
+      
+      const similarity = intersection.size / union.size;
+      return similarity >= 0.5; // 50% word overlap
+    };
+    
     // Collect research gaps from data.research_gaps
     const researchGaps = data?.research_gaps && Array.isArray(data.research_gaps) ? data.research_gaps : [];
     
@@ -782,36 +816,102 @@ export default function ScrollableAnalysisSections({ data, className = '', onExp
       ? data.evidence_traces.filter((e: any) => e.category === 'research_gap')
       : [];
     
-    // Combine both sources
-    const allResearchGaps: any[] = [];
+    // Process research gaps - prefer structured format
+    const processedGaps: any[] = [];
     
-    // Add research gaps from data.research_gaps
+    // First, add structured research gaps (prefer these as they have more info)
     researchGaps.forEach((gap: any) => {
-      allResearchGaps.push({
-        type: 'gap',
-        content: typeof gap === 'string' 
-          ? gap 
-          : gap.description || gap.gap || gap.text || JSON.stringify(gap),
-        original: gap
-      });
+      if (typeof gap === 'string') {
+        processedGaps.push({
+          type: 'gap',
+          content: gap,
+          description: gap,
+          gap_type: 'methodological',
+          significance: '',
+          evidence: '',
+          verification_reasoning: '',
+          original: gap
+        });
+      } else {
+        // Use standardized format
+        const description = gap.description || gap.gap || gap.text || '';
+        if (description) {
+          processedGaps.push({
+            type: 'gap',
+            content: description, // For display, use description
+            description: description,
+            gap_type: gap.gap_type || gap.type || 'methodological',
+            significance: gap.significance || '',
+            evidence: gap.evidence || '',
+            verification_reasoning: gap.verification_reasoning || gap.reasoning || '',
+            original: gap
+          });
+        }
+      }
     });
     
-    // Add research gap evidence traces
+    // Then, add evidence traces, but deduplicate against existing gaps
     researchGapEvidence.forEach((evidence: any) => {
-      // Use rationale if available, otherwise use text_snippet
-      const content = evidence.rationale || evidence.text_snippet || '';
-      if (content) {
-        allResearchGaps.push({
+      const evidenceText = evidence.text_snippet || '';
+      const rationale = evidence.rationale || '';
+      
+      // Skip if this is a methodological gap or unaddressed question (they're shown separately)
+      if (rationale.includes('Methodological Gap:') || rationale.includes('Unaddressed Question:')) {
+        return; // These will be shown in their respective sections
+      }
+      
+      // Extract description from rationale (it's usually at the start)
+      let description = evidenceText;
+      let gapType = 'methodological'; // Default
+      let significance = '';
+      
+      if (rationale) {
+        // Extract gap type from rationale
+        const typeMatch = rationale.match(/RESEARCH GAP:\s*(\w+)/i);
+        if (typeMatch) {
+          gapType = typeMatch[1].toLowerCase();
+        }
+        
+        // Try to extract description from formatted rationale
+        const descMatch = rationale.match(/GAP DESCRIPTION:\s*(.+?)(?:\n|💡|📄|🔬)/i);
+        if (descMatch) {
+          description = descMatch[1].trim();
+        } else {
+          // Fallback: use first line or text_snippet
+          description = rationale.split('\n')[0] || evidenceText;
+        }
+        
+        // Extract significance
+        const sigMatch = rationale.match(/SIGNIFICANCE:\s*(.+?)(?:\n|📄|🔬)/i);
+        if (sigMatch) {
+          significance = sigMatch[1].trim();
+        }
+      }
+      
+      // Check if this evidence is a duplicate of an existing gap
+      const isDuplicate = processedGaps.some(existing => {
+        const existingDesc = existing.description || existing.content || '';
+        return areSimilar(description, existingDesc);
+      });
+      
+      if (!isDuplicate && description) {
+        // Add as new gap, preferring evidence trace format (richer)
+        processedGaps.push({
           type: 'evidence',
-          content: content,
+          content: description, // Use clean description for display
+          description: description,
+          gap_type: gapType,
+          significance: significance,
+          evidence: evidenceText,
+          verification_reasoning: rationale,
           page: evidence.page_number,
-          textSnippet: evidence.text_snippet,
+          textSnippet: evidenceText,
           original: evidence
         });
       }
     });
     
-    const totalCount = allResearchGaps.length;
+    const totalCount = processedGaps.length;
     
     return (
       <ErrorBoundary>
@@ -828,8 +928,20 @@ export default function ScrollableAnalysisSections({ data, className = '', onExp
                 <span className="text-xs text-gray-500 bg-gray-100 px-2 py-1 rounded-full">{totalCount}</span>
               </div>
               <div className="space-y-3">
-                {allResearchGaps.map((item: any, index: number) => {
-                  const gapText = typeof item.content === 'string' ? item.content : (item.content?.text || item.content?.description || String(item.content));
+                {processedGaps.map((item: any, index: number) => {
+                  // Use description for clean display, fallback to content
+                  const displayText = item.description || item.content || '';
+                  
+                  // Get gap type for badge
+                  const gapType = item.gap_type || 'methodological';
+                  const gapTypeColors: Record<string, { bg: string; text: string }> = {
+                    methodological: { bg: 'bg-blue-100', text: 'text-blue-800' },
+                    theoretical: { bg: 'bg-purple-100', text: 'text-purple-800' },
+                    empirical: { bg: 'bg-green-100', text: 'text-green-800' },
+                    practical: { bg: 'bg-orange-100', text: 'text-orange-800' }
+                  };
+                  const typeColor = gapTypeColors[gapType] || { bg: 'bg-gray-100', text: 'text-gray-800' };
+                  
                   return (
                     <div key={index} className="bg-gradient-to-r from-yellow-50 to-orange-50 p-4 rounded-lg border border-yellow-200 hover:shadow-md transition-all">
                       <div className="flex items-start space-x-3">
@@ -837,9 +949,33 @@ export default function ScrollableAnalysisSections({ data, className = '', onExp
                           {index + 1}
                         </div>
                         <div className="flex-1">
-                          <p className="text-sm text-gray-700 leading-relaxed">
-                            <SafeRenderer data={gapText} />
+                          {/* Gap Type Badge */}
+                          {gapType && (
+                            <span className={`inline-block px-2 py-0.5 rounded text-xs font-medium mb-2 ${typeColor.bg} ${typeColor.text}`}>
+                              {gapType.charAt(0).toUpperCase() + gapType.slice(1)}
+                            </span>
+                          )}
+                          
+                          {/* Description */}
+                          <p className="text-sm text-gray-700 leading-relaxed font-medium mb-1">
+                            <SafeRenderer data={displayText} />
                           </p>
+                          
+                          {/* Significance (if available) */}
+                          {item.significance && (
+                            <p className="text-xs text-gray-600 italic mt-1">
+                              <span className="font-semibold">Significance:</span> {item.significance}
+                            </p>
+                          )}
+                          
+                          {/* Evidence (if available and different from description) */}
+                          {item.evidence && item.evidence !== displayText && (
+                            <p className="text-xs text-gray-500 mt-1 bg-gray-50 p-2 rounded">
+                              <span className="font-semibold">Evidence:</span> {item.evidence.substring(0, 200)}{item.evidence.length > 200 ? '...' : ''}
+                            </p>
+                          )}
+                          
+                          {/* Page number */}
                           {item.page && (
                             <span className="text-xs text-yellow-600 mt-1 inline-block">(Page {item.page})</span>
                           )}
@@ -852,33 +988,82 @@ export default function ScrollableAnalysisSections({ data, className = '', onExp
             </div>
           )}
         
-        {data?.future_directions && Array.isArray(data.future_directions) && data.future_directions.length > 0 && (
-          <div>
-            <h4 className="font-semibold text-green-800 mb-2">Future Directions</h4>
-            <ul className="space-y-1">
-              {data.future_directions.slice(0, 3).map((direction: any, index: number) => (
-                <li key={index} className="text-sm text-green-700 flex items-start">
-                  <span className="text-green-500 mr-2">→</span>
-                  <SafeRenderer data={direction} />
-                </li>
-              ))}
-            </ul>
-          </div>
-        )}
+        {(() => {
+          // Collect future directions from data
+          const directionsFromData = data?.future_directions && Array.isArray(data.future_directions) 
+            ? data.future_directions 
+            : [];
+          
+          // Extract methodological gaps that suggest future directions
+          const methodologicalGaps = data?.methodological_gaps && Array.isArray(data.methodological_gaps)
+            ? data.methodological_gaps
+            : [];
+          
+          const gapsAsDirections = methodologicalGaps
+            .map((gap: any) => {
+              if (typeof gap === 'string') return gap;
+              return gap.improvement || gap.description || gap.gap || '';
+            })
+            .filter((d: string) => d);
+          
+          // Combine and deduplicate
+          const allDirections = [...directionsFromData, ...gapsAsDirections];
+          const uniqueDirections = Array.from(new Set(allDirections.map((d: any) => {
+            if (typeof d === 'string') return d;
+            return d.direction || d.text || String(d);
+          })));
+          
+          return uniqueDirections.length > 0 ? (
+            <div>
+              <h4 className="font-semibold text-green-800 mb-2">Future Directions</h4>
+              <ul className="space-y-1">
+                {uniqueDirections.slice(0, 5).map((direction: any, index: number) => (
+                  <li key={index} className="text-sm text-green-700 flex items-start">
+                    <span className="text-green-500 mr-2">→</span>
+                    <SafeRenderer data={typeof direction === 'string' ? direction : (direction.direction || direction.text || String(direction))} />
+                  </li>
+                ))}
+              </ul>
+            </div>
+          ) : null;
+        })()}
         
-        {data?.unaddressed_questions && Array.isArray(data.unaddressed_questions) && data.unaddressed_questions.length > 0 && (
-          <div>
-            <h4 className="font-semibold text-blue-800 mb-2">Unaddressed Questions</h4>
-            <ul className="space-y-1">
-              {data.unaddressed_questions.slice(0, 3).map((question: any, index: number) => (
-                <li key={index} className="text-sm text-blue-700 flex items-start">
-                  <span className="text-blue-500 mr-2">?</span>
-                  <SafeRenderer data={question} />
-                </li>
-              ))}
-            </ul>
-          </div>
-        )}
+        {(() => {
+          // Collect unaddressed questions from both data and evidence traces
+          const questionsFromData = data?.unaddressed_questions && Array.isArray(data.unaddressed_questions) 
+            ? data.unaddressed_questions 
+            : [];
+          
+          // Extract questions from evidence traces
+          const questionsFromEvidence = researchGapEvidence
+            .filter((e: any) => e.rationale?.includes('Unaddressed Question:'))
+            .map((e: any) => {
+              const match = e.rationale?.match(/Unaddressed Question:\s*(.+?)(?:\.\s|$)/i);
+              return match ? match[1].trim() : null;
+            })
+            .filter((q: any) => q);
+          
+          // Combine and deduplicate
+          const allQuestions = [...questionsFromData, ...questionsFromEvidence];
+          const uniqueQuestions = Array.from(new Set(allQuestions.map((q: any) => {
+            if (typeof q === 'string') return q;
+            return q.question || q.text || String(q);
+          })));
+          
+          return uniqueQuestions.length > 0 ? (
+            <div>
+              <h4 className="font-semibold text-blue-800 mb-2">Unaddressed Questions</h4>
+              <ul className="space-y-1">
+                {uniqueQuestions.slice(0, 5).map((question: any, index: number) => (
+                  <li key={index} className="text-sm text-blue-700 flex items-start">
+                    <span className="text-blue-500 mr-2">?</span>
+                    <SafeRenderer data={typeof question === 'string' ? question : (question.question || question.text || String(question))} />
+                  </li>
+                ))}
+              </ul>
+            </div>
+          ) : null;
+        })()}
       </div>
     </ErrorBoundary>
     );
