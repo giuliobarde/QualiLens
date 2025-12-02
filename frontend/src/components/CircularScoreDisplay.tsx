@@ -1,10 +1,11 @@
 'use client';
 
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useRef } from 'react';
 
 interface CircularScoreDisplayProps {
   data: any;
   className?: string;
+  isExpanded?: boolean;
 }
 
 interface ScoreBreakdown {
@@ -16,9 +17,11 @@ interface ScoreBreakdown {
   source: string;
 }
 
-export default function CircularScoreDisplay({ data, className = '' }: CircularScoreDisplayProps) {
+export default function CircularScoreDisplay({ data, className = '', isExpanded = false }: CircularScoreDisplayProps) {
   const [scoreBreakdown, setScoreBreakdown] = useState<ScoreBreakdown | null>(null);
   const [animatedScore, setAnimatedScore] = useState(0);
+  const hasAnimatedRef = useRef(false);
+  const lastAnimatedScoreRef = useRef<number | null>(null);
 
   // Comprehensive score calculation
   const calculateComprehensiveScore = (): ScoreBreakdown => {
@@ -134,24 +137,37 @@ export default function CircularScoreDisplay({ data, className = '' }: CircularS
       const breakdown = calculateComprehensiveScore();
       setScoreBreakdown(breakdown);
       
-      // Animate score
-      const targetScore = breakdown.overall;
-      const duration = 1500;
-      const steps = 60;
-      const increment = targetScore / steps;
-      let current = 0;
+      // Check if this is new data (different score) or just a re-render (same score)
+      const isNewData = lastAnimatedScoreRef.current === null || 
+                        lastAnimatedScoreRef.current !== breakdown.overall;
       
-      const timer = setInterval(() => {
-        current += increment;
-        if (current >= targetScore) {
-          setAnimatedScore(targetScore);
-          clearInterval(timer);
-        } else {
-          setAnimatedScore(current);
-        }
-      }, duration / steps);
-      
-      return () => clearInterval(timer);
+      if (isNewData) {
+        // This is new data - reset animation flag and animate
+        hasAnimatedRef.current = false;
+        lastAnimatedScoreRef.current = breakdown.overall;
+        
+        const targetScore = breakdown.overall;
+        const duration = 1500;
+        const steps = 60;
+        const increment = targetScore / steps;
+        let current = 0;
+        
+        const timer = setInterval(() => {
+          current += increment;
+          if (current >= targetScore) {
+            setAnimatedScore(targetScore);
+            clearInterval(timer);
+            hasAnimatedRef.current = true;
+          } else {
+            setAnimatedScore(current);
+          }
+        }, duration / steps);
+        
+        return () => clearInterval(timer);
+      } else {
+        // Same data, just a re-render (like when isExpanded changes) - set score directly without animation
+        setAnimatedScore(breakdown.overall);
+      }
     }
   }, [data]);
 
@@ -187,6 +203,158 @@ export default function CircularScoreDisplay({ data, className = '' }: CircularS
   const circumference = 2 * Math.PI * radius;
   const offset = circumference - (normalizedScore / 100) * circumference;
 
+  if (isExpanded) {
+    // Horizontal spread layout for expanded view
+    return (
+      <div className={`${className}`}>
+        <h3 className="text-xl font-bold text-gray-800 mb-6 text-center">Overall Quality Score</h3>
+        
+        <div className="grid grid-cols-1 lg:grid-cols-5 gap-6 items-start">
+          {/* Main Score - Center */}
+          <div className="lg:col-span-2 flex flex-col items-center">
+            <div className="relative w-40 h-40 mx-auto mb-4">
+              <svg className="transform -rotate-90 w-40 h-40">
+                <circle
+                  cx="80"
+                  cy="80"
+                  r={radius * 0.8}
+                  stroke="#E5E7EB"
+                  strokeWidth="10"
+                  fill="none"
+                />
+                <circle
+                  cx="80"
+                  cy="80"
+                  r={radius * 0.8}
+                  stroke={getScoreColor(normalizedScore)}
+                  strokeWidth="10"
+                  fill="none"
+                  strokeLinecap="round"
+                  strokeDasharray={circumference * 0.8}
+                  strokeDashoffset={offset * 0.8}
+                  className="transition-all duration-1000 ease-out"
+                />
+              </svg>
+              <div className="absolute inset-0 flex flex-col items-center justify-center">
+                <div className="text-4xl font-bold" style={{ color: getScoreColor(normalizedScore) }}>
+                  {Math.round(normalizedScore)}
+                </div>
+                <div className="text-xs text-gray-500 mt-1">out of 100</div>
+              </div>
+            </div>
+            <div className={`text-lg font-bold mb-2`} style={{ color: getScoreColor(normalizedScore) }}>
+              {getScoreLabel(normalizedScore)}
+            </div>
+            <div className="text-sm text-gray-600 text-center max-w-xs">
+              {getScoreDescription(normalizedScore)}
+            </div>
+          </div>
+
+          {/* Score Breakdown - Right Side */}
+          {scoreBreakdown && scoreBreakdown.source !== 'direct_backend_score' ? (
+            <div className="lg:col-span-3">
+              <div className="text-sm font-semibold text-gray-700 mb-4">Score Breakdown</div>
+              <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+                <div className="bg-gradient-to-br from-blue-50 to-blue-100 p-4 rounded-xl border border-blue-200 text-center">
+                  <div className="text-gray-600 mb-2 text-sm font-medium">Methodology</div>
+                  <div className="text-3xl font-bold" style={{ color: getScoreColor(scoreBreakdown.methodology) }}>
+                    {Math.round(scoreBreakdown.methodology)}
+                  </div>
+                </div>
+                <div className="bg-gradient-to-br from-green-50 to-green-100 p-4 rounded-xl border border-green-200 text-center">
+                  <div className="text-gray-600 mb-2 text-sm font-medium">Reproducibility</div>
+                  <div className="text-3xl font-bold" style={{ color: getScoreColor(scoreBreakdown.reproducibility) }}>
+                    {Math.round(scoreBreakdown.reproducibility)}
+                  </div>
+                </div>
+                <div className="bg-gradient-to-br from-red-50 to-red-100 p-4 rounded-xl border border-red-200 text-center">
+                  <div className="text-gray-600 mb-2 text-sm font-medium">Bias</div>
+                  <div className="text-3xl font-bold" style={{ color: getScoreColor(scoreBreakdown.bias) }}>
+                    {Math.round(scoreBreakdown.bias)}
+                  </div>
+                </div>
+                <div className="bg-gradient-to-br from-purple-50 to-purple-100 p-4 rounded-xl border border-purple-200 text-center">
+                  <div className="text-gray-600 mb-2 text-sm font-medium">Statistics</div>
+                  <div className="text-3xl font-bold" style={{ color: getScoreColor(scoreBreakdown.statistics) }}>
+                    {Math.round(scoreBreakdown.statistics)}
+                  </div>
+                </div>
+              </div>
+              
+              {/* Additional metrics - Below breakdown */}
+              <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mt-4">
+                {data?.tools_used && (
+                  <div className="bg-blue-50 p-3 rounded-xl border border-blue-200 text-center">
+                    <div className="font-bold text-blue-800 text-2xl">{data.tools_used.length}</div>
+                    <div className="text-blue-600 text-sm">Tools Used</div>
+                  </div>
+                )}
+                
+                {data?.reproducibility_score !== undefined && (
+                  <div className="bg-green-50 p-3 rounded-xl border border-green-200 text-center">
+                    <div className="font-bold text-green-800 text-2xl">
+                      {Math.round(data.reproducibility_score * 100)}%
+                    </div>
+                    <div className="text-green-600 text-sm">Reproducible</div>
+                  </div>
+                )}
+                
+                {data?.detected_biases && (
+                  <div className="bg-red-50 p-3 rounded-xl border border-red-200 text-center">
+                    <div className="font-bold text-red-800 text-2xl">{data.detected_biases.length}</div>
+                    <div className="text-red-600 text-sm">Biases Found</div>
+                  </div>
+                )}
+                
+                {data?.research_gaps && (
+                  <div className="bg-yellow-50 p-3 rounded-xl border border-yellow-200 text-center">
+                    <div className="font-bold text-yellow-800 text-2xl">{data.research_gaps.length}</div>
+                    <div className="text-yellow-600 text-sm">Research Gaps</div>
+                  </div>
+                )}
+              </div>
+            </div>
+          ) : (
+            <div className="lg:col-span-3">
+              <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+                {data?.tools_used && (
+                  <div className="bg-blue-50 p-4 rounded-xl border border-blue-200 text-center">
+                    <div className="font-bold text-blue-800 text-3xl">{data.tools_used.length}</div>
+                    <div className="text-blue-600 text-sm mt-1">Tools Used</div>
+                  </div>
+                )}
+                
+                {data?.reproducibility_score !== undefined && (
+                  <div className="bg-green-50 p-4 rounded-xl border border-green-200 text-center">
+                    <div className="font-bold text-green-800 text-3xl">
+                      {Math.round(data.reproducibility_score * 100)}%
+                    </div>
+                    <div className="text-green-600 text-sm mt-1">Reproducible</div>
+                  </div>
+                )}
+                
+                {data?.detected_biases && (
+                  <div className="bg-red-50 p-4 rounded-xl border border-red-200 text-center">
+                    <div className="font-bold text-red-800 text-3xl">{data.detected_biases.length}</div>
+                    <div className="text-red-600 text-sm mt-1">Biases Found</div>
+                  </div>
+                )}
+                
+                {data?.research_gaps && (
+                  <div className="bg-yellow-50 p-4 rounded-xl border border-yellow-200 text-center">
+                    <div className="font-bold text-yellow-800 text-3xl">{data.research_gaps.length}</div>
+                    <div className="text-yellow-600 text-sm mt-1">Research Gaps</div>
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
+        </div>
+      </div>
+    );
+  }
+
+  // Default vertical layout
   return (
     <div className={`text-center ${className}`}>
       <h3 className="text-lg font-semibold text-gray-800 mb-6">Overall Quality Score</h3>

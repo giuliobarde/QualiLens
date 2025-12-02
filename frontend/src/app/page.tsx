@@ -36,6 +36,7 @@ export default function Home() {
   const [evidenceVisualizationFilter, setEvidenceVisualizationFilter] = useState<string>('all'); // Separate filter for Evidence Visualization only
   const [showHighlightDetails, setShowHighlightDetails] = useState(false);
   const [selectedHighlightEvidence, setSelectedHighlightEvidence] = useState<any>(null);
+  const [isPdfExpanded, setIsPdfExpanded] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const dropZoneRef = useRef<HTMLDivElement>(null);
   
@@ -660,54 +661,127 @@ export default function Home() {
             </div>
 
             <div className="space-y-6">
-              {/* Top Row: PDF Viewer and Quality Score */}
-            <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-              {/* Paper Display - 2/3 of screen */}
-              <div className="lg:col-span-2">
-                  <div className="bg-white/95 backdrop-blur-sm rounded-2xl shadow-lg overflow-hidden border border-gray-200/50 h-[calc(100vh-280px)]">
-                  <div className="bg-gradient-to-r from-gray-50 to-gray-100 px-6 py-4 border-b border-gray-200">
-                    <div className="flex items-center justify-between">
-                      <div className="flex items-center space-x-3">
-                        <div className="w-8 h-8 bg-blue-100 rounded-lg flex items-center justify-center">
-                          <svg className="w-5 h-5 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
-                          </svg>
+              {!isPdfExpanded ? (
+                /* Default Layout: PDF and Quality Score side by side */
+                <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+                  {/* Paper Display - 2/3 of screen */}
+                  <div className="lg:col-span-2">
+                    <div className="bg-white/95 backdrop-blur-sm rounded-2xl shadow-lg overflow-hidden border border-gray-200/50 h-[calc(100vh-280px)]">
+                      <div className="bg-gradient-to-r from-gray-50 to-gray-100 px-6 py-4 border-b border-gray-200">
+                        <div className="flex items-center justify-between">
+                          <div className="flex items-center space-x-3">
+                            <div className="w-8 h-8 bg-blue-100 rounded-lg flex items-center justify-center">
+                              <svg className="w-5 h-5 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                              </svg>
+                            </div>
+                            <h3 className="text-lg font-semibold text-gray-800">Document Viewer</h3>
+                          </div>
+                          <div className="flex items-center space-x-3">
+                            {attachedFile && (
+                              <span className="text-xs text-gray-500 font-medium">
+                                {(attachedFile.size / 1024 / 1024).toFixed(2)} MB
+                              </span>
+                            )}
+                            <button
+                              onClick={() => setIsPdfExpanded(true)}
+                              className="flex items-center space-x-2 px-3 py-1.5 bg-blue-600 hover:bg-blue-700 text-white rounded-lg transition-all shadow-sm hover:shadow-md"
+                              title="Expand PDF Viewer"
+                            >
+                              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 8V4m0 0h4M4 4l5 5m11-1V4m0 0h-4m4 0l-5 5M4 16v4m0 0h4m-4 0l5-5m11 5l-5-5m5 5v-4m0 4h-4" />
+                              </svg>
+                              <span className="text-sm font-medium">Expand</span>
+                            </button>
+                          </div>
                         </div>
-                        <h3 className="text-lg font-semibold text-gray-800">Document Viewer</h3>
                       </div>
-                        {attachedFile && (
-                          <span className="text-xs text-gray-500 font-medium">
-                              {(attachedFile.size / 1024 / 1024).toFixed(2)} MB
-                            </span>
-                        )}
-                    </div>
-                  </div>
-                  <div className="h-[calc(100%-73px)]">
-                    {pdfContent && (
+                      <div className="h-[calc(100%-73px)]">
+                        {pdfContent && (
                           <EnhancedPDFViewer
                             pdfUrl={pdfContent}
                             fileName={attachedFile?.name}
-                        evidenceTraces={analysisResult?.evidence_traces || []}
-                        selectedEvidenceId={selectedEvidenceId}
-                        onEvidenceClick={(evidence) => {
-                          setSelectedEvidenceId(evidence.id);
-                          setSelectedHighlightEvidence(evidence);
-                          setShowHighlightDetails(true);
-                        }}
-                        onExportFunctionsReady={setPdfExportFunctions}
+                            evidenceTraces={analysisResult?.evidence_traces || []}
+                            selectedEvidenceId={selectedEvidenceId}
+                            onEvidenceClick={(evidence) => {
+                              setSelectedEvidenceId(evidence.id);
+                              setSelectedHighlightEvidence(evidence);
+                              setShowHighlightDetails(true);
+                            }}
+                            onExportFunctionsReady={setPdfExportFunctions}
+                            initialScale={1.0}
                           />
                         )}
                       </div>
+                    </div>
                   </div>
-                </div>
 
-                {/* Quality Score - 1/3 of screen */}
-                <div className="lg:col-span-1">
-                  <div className="bg-white/95 backdrop-blur-sm rounded-2xl shadow-lg p-6 border border-gray-200/50 h-[calc(100vh-280px)]">
-                    <CircularScoreDisplay data={analysisResult} />
+                  {/* Quality Score - 1/3 of screen */}
+                  <div className="lg:col-span-1">
+                    <div className="bg-white/95 backdrop-blur-sm rounded-2xl shadow-lg p-6 border border-gray-200/50 h-[calc(100vh-280px)]">
+                      <CircularScoreDisplay data={analysisResult} isExpanded={false} />
+                    </div>
                   </div>
                 </div>
-              </div>
+              ) : (
+                /* Expanded Layout: PDF full width, Quality Score below */
+                <div className="space-y-6">
+                  {/* PDF Viewer - Full Width and Taller */}
+                  <div className="bg-white/95 backdrop-blur-sm rounded-2xl shadow-lg overflow-hidden border border-gray-200/50 h-[calc(100vh-250px)]">
+                    <div className="bg-gradient-to-r from-gray-50 to-gray-100 px-6 py-4 border-b border-gray-200">
+                      <div className="flex items-center justify-between">
+                        <div className="flex items-center space-x-3">
+                          <div className="w-8 h-8 bg-blue-100 rounded-lg flex items-center justify-center">
+                            <svg className="w-5 h-5 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                            </svg>
+                          </div>
+                          <h3 className="text-lg font-semibold text-gray-800">Document Viewer</h3>
+                        </div>
+                        <div className="flex items-center space-x-3">
+                          {attachedFile && (
+                            <span className="text-xs text-gray-500 font-medium">
+                              {(attachedFile.size / 1024 / 1024).toFixed(2)} MB
+                            </span>
+                          )}
+                          <button
+                            onClick={() => setIsPdfExpanded(false)}
+                            className="flex items-center space-x-2 px-3 py-1.5 bg-gray-600 hover:bg-gray-700 text-white rounded-lg transition-all shadow-sm hover:shadow-md"
+                            title="Collapse PDF Viewer"
+                          >
+                            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 9V4.5M9 9H4.5M9 9L3.75 3.75M9 15v4.5M9 15H4.5M9 15l-5.25 5.25M15 9h4.5M15 9V4.5M15 9l5.25-5.25M15 15h4.5M15 15v4.5m0-4.5l5.25 5.25" />
+                            </svg>
+                            <span className="text-sm font-medium">Collapse</span>
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+                    <div className="h-[calc(100%-73px)]">
+                      {pdfContent && (
+                        <EnhancedPDFViewer
+                          pdfUrl={pdfContent}
+                          fileName={attachedFile?.name}
+                          evidenceTraces={analysisResult?.evidence_traces || []}
+                          selectedEvidenceId={selectedEvidenceId}
+                          onEvidenceClick={(evidence) => {
+                            setSelectedEvidenceId(evidence.id);
+                            setSelectedHighlightEvidence(evidence);
+                            setShowHighlightDetails(true);
+                          }}
+                          onExportFunctionsReady={setPdfExportFunctions}
+                          initialScale={1.5}
+                        />
+                      )}
+                    </div>
+                  </div>
+
+                  {/* Quality Score - Spread Horizontally Below PDF */}
+                  <div className="bg-white/95 backdrop-blur-sm rounded-2xl shadow-lg p-6 border border-gray-200/50">
+                    <CircularScoreDisplay data={analysisResult} isExpanded={true} />
+                  </div>
+                </div>
+              )}
 
               {/* Bottom Row: Analysis Sections - Full Width */}
               <div className="bg-white/95 backdrop-blur-sm rounded-2xl shadow-lg overflow-hidden border border-gray-200/50">

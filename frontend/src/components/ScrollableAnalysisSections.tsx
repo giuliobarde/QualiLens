@@ -119,7 +119,6 @@ export default function ScrollableAnalysisSections({ data, className = '', onExp
     { id: 'summary', label: 'Summary', icon: '📝', color: 'blue' },
     { id: 'methodology', label: 'Methodology', icon: '🔬', color: 'green' },
     { id: 'bias', label: 'Bias Analysis', icon: '⚠️', color: 'red' },
-    { id: 'statistics', label: 'Statistics', icon: '📈', color: 'purple' },
     { id: 'reproducibility', label: 'Reproducibility', icon: '🔄', color: 'indigo' },
     { id: 'gaps', label: 'Research Gaps', icon: '🔍', color: 'yellow' },
     { id: 'citations', label: 'Citations', icon: '📚', color: 'pink' },
@@ -127,15 +126,29 @@ export default function ScrollableAnalysisSections({ data, className = '', onExp
 
   const getColorClasses = (color: string, isActive: boolean) => {
     const colorMap = {
-      blue: isActive ? 'bg-blue-100 text-blue-800 border-blue-200' : 'text-blue-600 hover:bg-blue-50',
-      green: isActive ? 'bg-green-100 text-green-800 border-green-200' : 'text-green-600 hover:bg-green-50',
-      red: isActive ? 'bg-red-100 text-red-800 border-red-200' : 'text-red-600 hover:bg-red-50',
-      purple: isActive ? 'bg-purple-100 text-purple-800 border-purple-200' : 'text-purple-600 hover:bg-purple-50',
-      indigo: isActive ? 'bg-indigo-100 text-indigo-800 border-indigo-200' : 'text-indigo-600 hover:bg-indigo-50',
-      yellow: isActive ? 'bg-yellow-100 text-yellow-800 border-yellow-200' : 'text-yellow-600 hover:bg-yellow-50',
-      pink: isActive ? 'bg-pink-100 text-pink-800 border-pink-200' : 'text-pink-600 hover:bg-pink-50',
+      blue: isActive 
+        ? 'bg-gradient-to-r from-blue-500 to-blue-600 text-white shadow-lg shadow-blue-500/30' 
+        : 'text-gray-600 hover:text-blue-600 hover:bg-blue-50/50',
+      green: isActive 
+        ? 'bg-gradient-to-r from-green-500 to-green-600 text-white shadow-lg shadow-green-500/30' 
+        : 'text-gray-600 hover:text-green-600 hover:bg-green-50/50',
+      red: isActive 
+        ? 'bg-gradient-to-r from-red-500 to-red-600 text-white shadow-lg shadow-red-500/30' 
+        : 'text-gray-600 hover:text-red-600 hover:bg-red-50/50',
+      purple: isActive 
+        ? 'bg-gradient-to-r from-purple-500 to-purple-600 text-white shadow-lg shadow-purple-500/30' 
+        : 'text-gray-600 hover:text-purple-600 hover:bg-purple-50/50',
+      indigo: isActive 
+        ? 'bg-gradient-to-r from-indigo-500 to-indigo-600 text-white shadow-lg shadow-indigo-500/30' 
+        : 'text-gray-600 hover:text-indigo-600 hover:bg-indigo-50/50',
+      yellow: isActive 
+        ? 'bg-gradient-to-r from-yellow-500 to-yellow-600 text-white shadow-lg shadow-yellow-500/30' 
+        : 'text-gray-600 hover:text-yellow-600 hover:bg-yellow-50/50',
+      pink: isActive 
+        ? 'bg-gradient-to-r from-pink-500 to-pink-600 text-white shadow-lg shadow-pink-500/30' 
+        : 'text-gray-600 hover:text-pink-600 hover:bg-pink-50/50',
     };
-    return colorMap[color as keyof typeof colorMap] || 'text-gray-600 hover:bg-gray-50';
+    return colorMap[color as keyof typeof colorMap] || (isActive ? 'bg-gray-600 text-white' : 'text-gray-600 hover:bg-gray-50/50');
   };
 
   const renderSummary = () => {
@@ -670,52 +683,6 @@ export default function ScrollableAnalysisSections({ data, className = '', onExp
     </ErrorBoundary>
   );
 
-  const renderStatistics = () => (
-    <ErrorBoundary>
-      <div className="space-y-4">
-        {data?.statistical_tests_used && Array.isArray(data.statistical_tests_used) && data.statistical_tests_used.length > 0 && (
-          <div>
-            <h4 className="font-semibold text-purple-800 mb-2">Statistical Tests</h4>
-            <div className="space-y-2">
-              {data.statistical_tests_used.slice(0, 3).map((test: any, index: number) => (
-                <div key={index} className="bg-purple-50 p-3 rounded">
-                  <SafeRenderer data={test} className="text-sm text-purple-700" />
-                </div>
-              ))}
-            </div>
-          </div>
-        )}
-        
-        {data?.statistical_concerns && Array.isArray(data.statistical_concerns) && data.statistical_concerns.length > 0 && (
-          <div>
-            <h4 className="font-semibold text-red-800 mb-2">Statistical Concerns ({data.statistical_concerns.length})</h4>
-            <div className="space-y-2">
-              {data.statistical_concerns.slice(0, 2).map((concern: any, index: number) => (
-                <div key={index} className="bg-red-50 p-3 rounded border border-red-200">
-                  <SafeRenderer data={concern} className="text-sm text-red-700" />
-                </div>
-              ))}
-            </div>
-          </div>
-        )}
-        
-        {data?.statistical_recommendations && Array.isArray(data.statistical_recommendations) && data.statistical_recommendations.length > 0 && (
-          <div>
-            <h4 className="font-semibold text-green-800 mb-2">Recommendations</h4>
-            <ul className="space-y-1">
-              {data.statistical_recommendations.slice(0, 3).map((rec: any, index: number) => (
-                <li key={index} className="text-sm text-green-700 flex items-start">
-                  <span className="text-green-500 mr-2">✓</span>
-                  <SafeRenderer data={rec} />
-                </li>
-              ))}
-            </ul>
-          </div>
-        )}
-      </div>
-    </ErrorBoundary>
-  );
-
   const renderReproducibility = () => (
     <ErrorBoundary>
       <div className="space-y-4">
@@ -1217,8 +1184,6 @@ export default function ScrollableAnalysisSections({ data, className = '', onExp
         return renderMethodology();
       case 'bias':
         return renderBiasAnalysis();
-      case 'statistics':
-        return renderStatistics();
       case 'reproducibility':
         return renderReproducibility();
       case 'gaps':
@@ -1232,38 +1197,53 @@ export default function ScrollableAnalysisSections({ data, className = '', onExp
 
   return (
     <div className={`flex flex-col h-full ${className}`}>
-      {/* Enhanced Section Navigation */}
-      <div className="bg-gradient-to-r from-gray-50 to-gray-100 border-b border-gray-200 p-4">
-        <div className="flex items-center justify-between mb-4">
-          <h3 className="text-lg font-semibold text-gray-800 flex items-center">
-            <svg className="w-5 h-5 mr-2 text-gray-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2" />
-            </svg>
-            Analysis Sections
-          </h3>
-        </div>
-        <div className="grid grid-cols-2 gap-2">
-          {sections.map((section) => (
-            <button
-              key={section.id}
-              onClick={() => setActiveSection(section.id)}
-              className={`p-3 rounded-xl text-xs font-semibold transition-all border-2 transform hover:scale-105 ${
-                activeSection === section.id 
-                  ? getColorClasses(section.color, true) + ' shadow-md scale-105'
-                  : getColorClasses(section.color, false) + ' border-transparent hover:border-gray-300'
-              }`}
-            >
-              <span className="mr-1.5 text-base">{section.icon}</span>
-              {section.label}
-            </button>
-          ))}
+      {/* Modern Section Navigation */}
+      <div className="bg-white/80 backdrop-blur-md border-b border-gray-200/50 shadow-sm">
+        <div className="px-6 pt-5 pb-3">
+          <div className="flex items-center justify-between mb-4">
+            <h3 className="text-xl font-bold text-gray-900 flex items-center gap-2">
+              <div className="w-1 h-6 bg-gradient-to-b from-blue-500 to-indigo-600 rounded-full"></div>
+              <span>Analytics Sections</span>
+            </h3>
+          </div>
+          
+          {/* Modern Horizontal Scrollable Tab Bar */}
+          <div className="flex gap-2 overflow-x-auto pb-2 scrollbar-hide">
+            {sections.map((section) => (
+              <button
+                key={section.id}
+                onClick={() => setActiveSection(section.id)}
+                className={`
+                  relative px-5 py-2.5 rounded-full text-sm font-medium
+                  transition-all duration-300 ease-out
+                  whitespace-nowrap
+                  flex items-center gap-2
+                  ${activeSection === section.id 
+                    ? getColorClasses(section.color, true) + ' scale-105'
+                    : getColorClasses(section.color, false) + ' bg-white border border-gray-200 hover:border-gray-300'
+                  }
+                  ${activeSection === section.id ? 'shadow-md' : 'shadow-sm hover:shadow'}
+                `}
+              >
+                <span className={`text-base transition-transform duration-300 ${activeSection === section.id ? 'scale-110' : ''}`}>
+                  {section.icon}
+                </span>
+                <span className="font-semibold">{section.label}</span>
+                {activeSection === section.id && (
+                  <div className="absolute -bottom-1 left-1/2 transform -translate-x-1/2 w-1 h-1 bg-white rounded-full animate-pulse"></div>
+                )}
+              </button>
+            ))}
+          </div>
         </div>
       </div>
       
-      {/* Enhanced Section Content */}
-      <div className="flex-1 overflow-y-auto p-6 analysis-scroll">
-        <div className="animate-fade-in">
-          {renderSectionContent()}
+      {/* Modern Section Content */}
+      <div className="flex-1 overflow-y-auto p-6 analysis-scroll bg-gradient-to-b from-gray-50/50 to-white">
+        <div className="max-w-5xl mx-auto">
+          <div className="animate-fade-in">
+            {renderSectionContent()}
+          </div>
         </div>
       </div>
     </div>

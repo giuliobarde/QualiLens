@@ -35,6 +35,7 @@ interface EnhancedPDFViewerProps {
   selectedEvidenceId?: string | null;
   onEvidenceClick?: (evidence: EvidenceItem) => void;
   onExportFunctionsReady?: (functions: { exportCurrentPage: () => void; exportAllPages: () => void }) => void;
+  initialScale?: number;
 }
 
 const getCategoryColor = (category: string): { fill: string; stroke: string } => {
@@ -58,7 +59,8 @@ export default function EnhancedPDFViewer({
   evidenceTraces = [],
   selectedEvidenceId,
   onEvidenceClick,
-  onExportFunctionsReady
+  onExportFunctionsReady,
+  initialScale = 1.0
 }: EnhancedPDFViewerProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const canvasRefs = useRef<Map<number, HTMLCanvasElement>>(new Map());
@@ -67,7 +69,7 @@ export default function EnhancedPDFViewer({
   const [pdf, setPdf] = useState<pdfjsLib.PDFDocumentProxy | null>(null);
   const [numPages, setNumPages] = useState(0);
   const [currentPage, setCurrentPage] = useState(1);
-  const [scale, setScale] = useState(1.0);
+  const [scale, setScale] = useState(initialScale);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [hoveredEvidenceId, setHoveredEvidenceId] = useState<string | null>(null);
@@ -354,6 +356,20 @@ export default function EnhancedPDFViewer({
       pageRenderingRef.current.delete(pageNum);
     }
   }, [pdf, scale, renderHighlights]);
+
+  // Sync scale when initialScale prop changes
+  useEffect(() => {
+    setScale(initialScale);
+  }, [initialScale]);
+
+  // Force re-render of current page when scale changes
+  useEffect(() => {
+    if (pdf && currentPage) {
+      // Clear the rendering flag to force re-render
+      pageRenderingRef.current.delete(currentPage);
+      renderPage(currentPage);
+    }
+  }, [scale, pdf, currentPage, renderPage]);
 
   // Re-render highlights when selection, filter, or visibility changes
   useEffect(() => {
