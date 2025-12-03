@@ -49,6 +49,32 @@ export default function Home() {
   // Scroll direction tracking for sticky action bar
   const [isActionBarVisible, setIsActionBarVisible] = useState(true);
   const lastScrollY = useRef(0);
+  const scrollThreshold = 300; // Pixels to scroll before auto-hide behavior activates
+  const scrollJitterThreshold = 5; // Minimum scroll difference to avoid jitter
+
+  // Determine action bar visibility based on scroll position and direction
+  const calculateActionBarVisibility = useCallback((currentScrollY: number, previousScrollY: number, currentVisibility: boolean): boolean => {
+    // Always show when at the very top of the page (initial load)
+    if (currentScrollY === 0 && previousScrollY === 0) {
+      return true;
+    }
+    
+    const scrollDifference = Math.abs(currentScrollY - previousScrollY);
+    
+    // Ignore tiny scroll movements to prevent jitter (but not on initial load)
+    if (scrollDifference < scrollJitterThreshold && previousScrollY !== 0) {
+      return currentVisibility; // Keep current state
+    }
+    
+    // Always show when near the top of the page
+    if (currentScrollY < scrollThreshold) {
+      return true;
+    }
+    
+    // Below threshold: show when scrolling up, hide when scrolling down
+    const isScrollingUp = currentScrollY < previousScrollY;
+    return isScrollingUp;
+  }, []);
 
   // Load persisted state from localStorage on mount
   useEffect(() => {
@@ -265,42 +291,40 @@ export default function Home() {
 
   // Handle scroll direction for sticky action bar
   useEffect(() => {
+    // Only manage scroll behavior when analysis results are available
+    if (!analysisResult) {
+      setIsActionBarVisible(false);
+      lastScrollY.current = 0;
+      return;
+    }
+
     const handleScroll = () => {
       const currentScrollY = window.scrollY;
-      const scrollDifference = Math.abs(currentScrollY - lastScrollY.current);
-      const scrollThreshold = 300; // Require scrolling 300px before showing action bar
+      const previousScrollY = lastScrollY.current;
       
-      // Only update if scroll difference is significant (avoid jitter)
-      if (scrollDifference < 5) return;
+      // Use functional update to access current visibility state
+      setIsActionBarVisible((currentVisibility) => {
+        return calculateActionBarVisibility(currentScrollY, previousScrollY, currentVisibility);
+      });
       
-      // Only show action bar after user has scrolled past the threshold
-      if (currentScrollY < scrollThreshold) {
-        // Scrolling up - always show
-        setIsActionBarVisible(true);
-      } else {
-        // Past threshold - show when scrolling up, hide when scrolling down
-        if (currentScrollY < lastScrollY.current) {
-          // Scrolling up - show
-          setIsActionBarVisible(true);
-        } else if (currentScrollY > lastScrollY.current) {
-          // Scrolling down - hide
-          setIsActionBarVisible(false);
-        }
-      }
-      
+      // Update scroll position reference after calculating visibility
       lastScrollY.current = currentScrollY;
     };
 
-    // Only add scroll listener when analysis results are shown
-    if (analysisResult) {
-      window.addEventListener('scroll', handleScroll, { passive: true });
-      return () => window.removeEventListener('scroll', handleScroll);
-    } else {
-      // Reset visibility when no results
-      setIsActionBarVisible(false);
-      lastScrollY.current = 0;
-    }
-  }, [analysisResult]);
+    // Initialize scroll position reference to current scroll position
+    // This ensures proper initialization on page load/refresh
+    const initialScrollY = window.scrollY;
+    lastScrollY.current = initialScrollY;
+    
+    // Set initial visibility immediately based on scroll position
+    // At top of page (scrollY < threshold), always show
+    const initialVisibility = initialScrollY < scrollThreshold;
+    setIsActionBarVisible(initialVisibility);
+    
+    // Then set up scroll listener for subsequent scroll events
+    window.addEventListener('scroll', handleScroll, { passive: true });
+    return () => window.removeEventListener('scroll', handleScroll);
+  }, [analysisResult, calculateActionBarVisibility, scrollThreshold]);
 
   // File selection handler
   const handleFileSelection = useCallback((file: File) => {
