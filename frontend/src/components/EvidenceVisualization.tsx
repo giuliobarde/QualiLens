@@ -171,18 +171,7 @@ function EvidenceVisualization({
   }
 
   return (
-    <div className="bg-white/90 backdrop-blur-sm rounded-2xl shadow-lg border border-gray-200/50 overflow-hidden">
-      <div className="bg-gradient-to-r from-gray-50 to-gray-100 px-6 py-4 border-b border-gray-200">
-        <div className="flex items-center justify-between">
-          <div>
-            <h3 className="text-lg font-semibold text-gray-800">Evidence Visualization</h3>
-            <p className="text-sm text-gray-600 mt-1">
-              {filteredEvidence.length} evidence item{filteredEvidence.length !== 1 ? 's' : ''} found
-            </p>
-          </div>
-        </div>
-      </div>
-
+    <div className="overflow-hidden">
       <div className="px-6 py-4 border-b border-gray-200 bg-gray-50">
         <div className="flex items-center space-x-2 flex-wrap gap-2">
           <span className="text-sm font-medium text-gray-700">Filter:</span>
@@ -199,7 +188,7 @@ function EvidenceVisualization({
               {category.charAt(0).toUpperCase() + category.slice(1)}
               {category !== 'all' && (
                 <span className="ml-1.5 px-1.5 py-0.5 bg-white/20 rounded text-xs">
-                  {evidenceTraces.filter(e => e.category === category).length}
+                  {evidenceTraces.filter(e => e.category === category && e.category !== 'research_gap').length}
                 </span>
               )}
             </button>

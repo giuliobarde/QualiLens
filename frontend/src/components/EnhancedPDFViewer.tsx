@@ -81,6 +81,7 @@ export default function EnhancedPDFViewer({
   const [enabledCategories, setEnabledCategories] = useState<Set<string>>(new Set(['bias', 'limitation', 'methodology', 'reproducibility', 'statistics'])); // All categories enabled by default
   const [isExporting, setIsExporting] = useState<boolean>(false);
   const pageRenderingRef = useRef<Set<number>>(new Set());
+  const renderTaskRefs = useRef<Map<number, any>>(new Map()); // Store render tasks to cancel them
   const lastScrolledEvidenceIdRef = useRef<string | null>(null);
 
   // Filter evidence by enabled categories - use useMemo to prevent recreation on every render
@@ -125,6 +126,23 @@ export default function EnhancedPDFViewer({
     });
   }, [evidenceTraces, filteredEvidence, evidenceByPage]);
 
+  // Cleanup: Cancel all render tasks on unmount or PDF change
+  useEffect(() => {
+    return () => {
+      // Cancel all ongoing render tasks
+      renderTaskRefs.current.forEach((task, pageNum) => {
+        try {
+          task.cancel();
+          console.log(`🛑 Cancelled render task for page ${pageNum} on cleanup`);
+        } catch (err) {
+          // Task may already be completed, ignore
+        }
+      });
+      renderTaskRefs.current.clear();
+      pageRenderingRef.current.clear();
+    };
+  }, [pdfUrl]);
+
   // Load PDF
   useEffect(() => {
     if (!pdfUrl) {
@@ -134,6 +152,18 @@ export default function EnhancedPDFViewer({
 
     setLoading(true);
     setError(null);
+
+    // Cancel all existing render tasks when loading new PDF
+    renderTaskRefs.current.forEach((task, pageNum) => {
+      try {
+        task.cancel();
+        console.log(`🛑 Cancelled render task for page ${pageNum} due to new PDF`);
+      } catch (err) {
+        // Task may already be completed, ignore
+      }
+    });
+    renderTaskRefs.current.clear();
+    pageRenderingRef.current.clear();
 
     const loadPDF = async () => {
       try {
@@ -298,7 +328,30 @@ export default function EnhancedPDFViewer({
 
   // Render a specific page
   const renderPage = useCallback(async (pageNum: number) => {
-    if (!pdf || pageRenderingRef.current.has(pageNum)) return;
+    if (!pdf) return;
+
+    // Cancel any existing render task for this page
+    const existingTask = renderTaskRefs.current.get(pageNum);
+    if (existingTask) {
+      try {
+        existingTask.cancel();
+        console.log(`🛑 Cancelled existing render task for page ${pageNum}`);
+      } catch (err) {
+        // Task may already be completed or cancelled, ignore error
+        console.log(`ℹ️ Could not cancel render task for page ${pageNum} (may already be done)`);
+      }
+      renderTaskRefs.current.delete(pageNum);
+    }
+
+    // If already rendering, wait a bit and try again
+    if (pageRenderingRef.current.has(pageNum)) {
+      // Wait for current render to potentially finish
+      await new Promise(resolve => setTimeout(resolve, 50));
+      if (pageRenderingRef.current.has(pageNum)) {
+        console.log(`⏳ Page ${pageNum} is already rendering, skipping...`);
+        return;
+      }
+    }
 
     pageRenderingRef.current.add(pageNum);
 
@@ -310,12 +363,14 @@ export default function EnhancedPDFViewer({
       const canvas = canvasRefs.current.get(pageNum);
       if (!canvas) {
         console.warn(`⚠️ No canvas element for page ${pageNum}`);
+        pageRenderingRef.current.delete(pageNum);
         return;
       }
 
       const context = canvas.getContext('2d');
       if (!context) {
         console.warn(`⚠️ Could not get 2d context for page ${pageNum}`);
+        pageRenderingRef.current.delete(pageNum);
         return;
       }
 
@@ -332,7 +387,11 @@ export default function EnhancedPDFViewer({
         // @ts-ignore - PDF.js render context type definition may vary
       };
 
-      await page.render(renderContext as any).promise;
+      // Start render and store the task
+      const renderTask = page.render(renderContext as any);
+      renderTaskRefs.current.set(pageNum, renderTask);
+
+      await renderTask.promise;
 
       // Get highlight canvas and ensure it matches PDF canvas size
       const highlightCanvas = highlightCanvasRefs.current.get(pageNum);
@@ -352,10 +411,16 @@ export default function EnhancedPDFViewer({
       }, 50);
 
       console.log(`✅ Rendered page ${pageNum} (${viewport.width}x${viewport.height})`);
-    } catch (err) {
-      console.error(`❌ Failed to render page ${pageNum}:`, err);
+    } catch (err: any) {
+      // Check if error is due to cancellation
+      if (err?.name === 'RenderingCancelledException' || err?.message?.includes('cancelled')) {
+        console.log(`ℹ️ Render cancelled for page ${pageNum}`);
+      } else {
+        console.error(`❌ Failed to render page ${pageNum}:`, err);
+      }
     } finally {
       pageRenderingRef.current.delete(pageNum);
+      renderTaskRefs.current.delete(pageNum);
     }
   }, [pdf, scale, renderHighlights]);
 
@@ -367,6 +432,17 @@ export default function EnhancedPDFViewer({
   // Force re-render of current page when scale changes
   useEffect(() => {
     if (pdf && currentPage) {
+      // Cancel any existing render task for current page
+      const existingTask = renderTaskRefs.current.get(currentPage);
+      if (existingTask) {
+        try {
+          existingTask.cancel();
+          console.log(`🛑 Cancelled render task for page ${currentPage} due to scale change`);
+        } catch (err) {
+          // Task may already be completed, ignore
+        }
+        renderTaskRefs.current.delete(currentPage);
+      }
       // Clear the rendering flag to force re-render
       pageRenderingRef.current.delete(currentPage);
       renderPage(currentPage);

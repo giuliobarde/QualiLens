@@ -63,17 +63,22 @@ export default function Home() {
     const handleScroll = () => {
       const currentScrollY = window.scrollY;
       const scrollDifference = Math.abs(currentScrollY - lastScrollY.current);
+      const scrollThreshold = 300; // Require scrolling 300px before showing action bar
       
       // Only update if scroll difference is significant (avoid jitter)
       if (scrollDifference < 5) return;
       
-      // Show bar when scrolling up, hide when scrolling down
-      if (currentScrollY < lastScrollY.current) {
+      // Only show action bar after user has scrolled past the threshold
+      if (currentScrollY < scrollThreshold) {
         // Scrolling up - always show
         setIsActionBarVisible(true);
-      } else if (currentScrollY > lastScrollY.current) {
-        // Scrolling down - always hide (unless at very top)
-        if (currentScrollY > 50) {
+      } else {
+        // Past threshold - show when scrolling up, hide when scrolling down
+        if (currentScrollY < lastScrollY.current) {
+          // Scrolling up - show
+          setIsActionBarVisible(true);
+        } else if (currentScrollY > lastScrollY.current) {
+          // Scrolling down - hide
           setIsActionBarVisible(false);
         }
       }
@@ -87,7 +92,7 @@ export default function Home() {
       return () => window.removeEventListener('scroll', handleScroll);
     } else {
       // Reset visibility when no results
-      setIsActionBarVisible(true);
+      setIsActionBarVisible(false);
       lastScrollY.current = 0;
     }
   }, [analysisResult]);
@@ -727,7 +732,7 @@ export default function Home() {
                 /* Expanded Layout: PDF full width, Quality Score below */
                 <div className="space-y-6">
                   {/* PDF Viewer - Full Width and Taller */}
-                  <div className="bg-white/95 backdrop-blur-sm rounded-2xl shadow-lg overflow-hidden border border-gray-200/50 h-[calc(100vh-250px)]">
+                  <div className="bg-white/95 backdrop-blur-sm rounded-2xl shadow-lg overflow-hidden border border-gray-200/50 h-[calc(100vh-150px)]">
                     <div className="bg-gradient-to-r from-gray-50 to-gray-100 px-6 py-4 border-b border-gray-200">
                       <div className="flex items-center justify-between">
                         <div className="flex items-center space-x-3">
@@ -792,37 +797,62 @@ export default function Home() {
               </div>
             </div>
 
-            {/* Evidence Visualization Section */}
-            {analysisResult?.evidence_traces && Array.isArray(analysisResult.evidence_traces) && analysisResult.evidence_traces.length > 0 ? (
-              <div className="mt-6">
-                <EvidenceVisualization
-                  evidenceTraces={analysisResult.evidence_traces}
-                  pdfContent={pdfContent}
-                  selectedCategory={evidenceVisualizationFilter}
-                  onCategoryChange={setEvidenceVisualizationFilter}
-                  selectedEvidence={selectedHighlightEvidence}
-                  onEvidenceClick={(evidence) => {
-                    setSelectedEvidenceId(evidence.id);
-                    setSelectedHighlightEvidence(evidence);
-                    // Scroll to the page in PDF viewer
-                    if (evidence.page_number) {
-                      // The PDF viewer will handle scrolling
-                    }
-                  }}
-                  onExportFunctionsReady={setEvidenceExportFunctions}
-                />
-              </div>
-            ) : analysisResult && (
-              <div className="mt-6 bg-yellow-50 border border-yellow-200 rounded-lg p-4">
-                <div className="flex items-center space-x-2">
-                  <svg className="w-5 h-5 text-yellow-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
-                  </svg>
-                  <p className="text-sm text-yellow-800">
-                    No evidence traces available. Evidence visualization requires PDF analysis with evidence collection.
-                  </p>
+            {/* Evidence Visualization Section - Collapsible */}
+            {analysisResult?.evidence_traces && Array.isArray(analysisResult.evidence_traces) && analysisResult.evidence_traces.length > 0 ? (() => {
+              const filteredEvidenceCount = analysisResult.evidence_traces.filter((e: any) => e.category !== 'research_gap').length;
+              return (
+              <details open className="mt-6 bg-white/95 backdrop-blur-sm rounded-2xl shadow-lg border border-gray-200/50 overflow-hidden">
+                <summary className="bg-gradient-to-r from-gray-50 to-gray-100 px-6 py-4 border-b border-gray-200 cursor-pointer hover:bg-gray-100 transition-colors list-none">
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <h3 className="text-lg font-semibold text-gray-800">Evidence Visualization</h3>
+                      <p className="text-sm text-gray-600 mt-1">
+                        {filteredEvidenceCount} evidence item{filteredEvidenceCount !== 1 ? 's' : ''} found
+                      </p>
+                    </div>
+                    <svg className="w-5 h-5 text-gray-600 transition-transform duration-200" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+                    </svg>
+                  </div>
+                </summary>
+                <div>
+                  <EvidenceVisualization
+                    evidenceTraces={analysisResult.evidence_traces}
+                    pdfContent={pdfContent}
+                    selectedCategory={evidenceVisualizationFilter}
+                    onCategoryChange={setEvidenceVisualizationFilter}
+                    selectedEvidence={selectedHighlightEvidence}
+                    onEvidenceClick={(evidence) => {
+                      setSelectedEvidenceId(evidence.id);
+                      setSelectedHighlightEvidence(evidence);
+                      // Scroll to the page in PDF viewer
+                      if (evidence.page_number) {
+                        // The PDF viewer will handle scrolling
+                      }
+                    }}
+                    onExportFunctionsReady={setEvidenceExportFunctions}
+                  />
                 </div>
-              </div>
+              </details>
+              );
+            })() : analysisResult && (
+              <details className="mt-6 bg-white/95 backdrop-blur-sm rounded-2xl shadow-lg border border-gray-200/50 overflow-hidden">
+                <summary className="bg-yellow-50 border-b border-yellow-200 px-6 py-4 cursor-pointer hover:bg-yellow-100 transition-colors list-none">
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center space-x-2">
+                      <svg className="w-5 h-5 text-yellow-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+                      </svg>
+                      <p className="text-sm text-yellow-800">
+                        No evidence traces available. Evidence visualization requires PDF analysis with evidence collection.
+                      </p>
+                    </div>
+                    <svg className="w-5 h-5 text-yellow-600 transition-transform duration-200" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+                    </svg>
+                  </div>
+                </summary>
+              </details>
             )}
           </div>
         )}

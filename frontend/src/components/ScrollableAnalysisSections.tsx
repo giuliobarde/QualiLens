@@ -643,45 +643,504 @@ export default function ScrollableAnalysisSections({ data, className = '', onExp
     );
   };
 
-  const renderBiasAnalysis = () => (
-    <ErrorBoundary>
-      <div className="space-y-4">
-        {data?.bias_summary && (
-          <div className="bg-yellow-50 p-4 rounded-lg border-l-4 border-yellow-400">
-            <h4 className="font-semibold text-yellow-800 mb-2">Bias Assessment</h4>
-            <SafeRenderer data={data.bias_summary} className="text-sm text-yellow-700" />
-          </div>
-        )}
-        
-        {data?.detected_biases && Array.isArray(data.detected_biases) && data.detected_biases.length > 0 && (
-          <div>
-            <h4 className="font-semibold text-red-800 mb-2">Detected Biases ({data.detected_biases.length})</h4>
-            <div className="space-y-2">
-              {data.detected_biases.slice(0, 3).map((bias: any, index: number) => (
-                <div key={index} className="bg-red-50 p-3 rounded border border-red-200">
-                  <SafeRenderer data={bias} className="text-sm text-red-700" />
+  const renderBiasAnalysis = () => {
+    // Helper function to get severity badge styling
+    const getSeverityBadgeColor = (severity: string) => {
+      switch (severity?.toLowerCase()) {
+        case 'high': return 'bg-red-100 text-red-800 border-red-300';
+        case 'medium': return 'bg-yellow-100 text-yellow-800 border-yellow-300';
+        case 'low': return 'bg-orange-100 text-orange-800 border-orange-300';
+        default: return 'bg-gray-100 text-gray-800 border-gray-300';
+      }
+    };
+
+    // Helper function to get bias type icon
+    const getBiasTypeIcon = (biasType: string) => {
+      const type = biasType?.toLowerCase() || '';
+      if (type.includes('selection')) return '👥';
+      if (type.includes('measurement')) return '📏';
+      if (type.includes('confounding')) return '🔀';
+      if (type.includes('publication')) return '📰';
+      if (type.includes('reporting')) return '📝';
+      return '⚠️';
+    };
+
+    // Helper function to format bias type name
+    const formatBiasType = (biasType: string) => {
+      if (!biasType) return 'Unknown Bias';
+      return biasType
+        .split('_')
+        .map(word => word.charAt(0).toUpperCase() + word.slice(1))
+        .join(' ');
+    };
+
+    // Helper function to extract text from limitation (handles both string and object formats)
+    const extractLimitationText = (limitation: any): string => {
+      if (typeof limitation === 'string') return limitation;
+      if (typeof limitation === 'object' && limitation !== null) {
+        return limitation.description || limitation.text || limitation.content || JSON.stringify(limitation);
+      }
+      return String(limitation);
+    };
+
+    // Helper function to extract impact from limitation
+    const extractLimitationImpact = (limitation: any): string | null => {
+      if (typeof limitation === 'object' && limitation !== null) {
+        return limitation.impact || null;
+      }
+      return null;
+    };
+
+    // Helper function to extract confidence from limitation
+    const extractLimitationConfidence = (limitation: any): number | null => {
+      if (typeof limitation === 'object' && limitation !== null) {
+        return limitation.confidence_percentage || null;
+      }
+      return null;
+    };
+
+    // Get all data
+    const detectedBiases = data?.detected_biases && Array.isArray(data.detected_biases) ? data.detected_biases : [];
+    const limitations = data?.limitations && Array.isArray(data.limitations) ? data.limitations : [];
+    const confoundingFactors = data?.confounding_factors && Array.isArray(data.confounding_factors) ? data.confounding_factors : [];
+    const severityScores = data?.severity_scores || {};
+    const recommendations = data?.recommendations && Array.isArray(data.recommendations) ? data.recommendations : [];
+
+    // Calculate detailed statistics for Bias Assessment
+    const biasStats = {
+      total: detectedBiases.length,
+      high: detectedBiases.filter((b: any) => (b.severity || '').toLowerCase() === 'high').length,
+      medium: detectedBiases.filter((b: any) => (b.severity || '').toLowerCase() === 'medium').length,
+      low: detectedBiases.filter((b: any) => (b.severity || '').toLowerCase() === 'low').length,
+      byType: {} as Record<string, number>,
+      avgConfidence: detectedBiases.length > 0
+        ? Math.round(detectedBiases.reduce((sum: number, b: any) => sum + (b.confidence_percentage || 0), 0) / detectedBiases.length)
+        : 0
+    };
+
+    // Count biases by type
+    detectedBiases.forEach((bias: any) => {
+      const type = bias.bias_type || 'unknown';
+      biasStats.byType[type] = (biasStats.byType[type] || 0) + 1;
+    });
+
+    // Calculate overall risk level
+    const getOverallRiskLevel = () => {
+      if (biasStats.high > 0) return { level: 'High', color: 'text-red-600', bg: 'bg-red-100' };
+      if (biasStats.medium >= 2 || biasStats.total >= 5) return { level: 'Medium', color: 'text-yellow-600', bg: 'bg-yellow-100' };
+      if (biasStats.total > 0) return { level: 'Low', color: 'text-orange-600', bg: 'bg-orange-100' };
+      return { level: 'Minimal', color: 'text-green-600', bg: 'bg-green-100' };
+    };
+    const riskLevel = getOverallRiskLevel();
+
+    return (
+      <ErrorBoundary>
+        <div className="space-y-6">
+          {/* Enhanced Bias Assessment Summary - Collapsible */}
+          <details open className="bg-gradient-to-r from-yellow-50 to-orange-50 rounded-xl border-l-4 border-yellow-400 shadow-sm overflow-hidden">
+            <summary className="p-5 cursor-pointer hover:bg-yellow-100/50 transition-colors list-none">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center">
+                  <svg className="w-5 h-5 text-yellow-600 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+                  </svg>
+                  <h4 className="font-bold text-yellow-900 text-lg">Bias Assessment</h4>
                 </div>
-              ))}
+                <div className="flex items-center space-x-3">
+                  <span className={`px-3 py-1 text-xs font-semibold rounded-full ${riskLevel.bg} ${riskLevel.color}`}>
+                    {riskLevel.level} Risk
+                  </span>
+                  <svg className="w-5 h-5 text-yellow-600 transition-transform duration-200" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+                  </svg>
+                </div>
+              </div>
+            </summary>
+            <div className="px-5 pb-5 pt-2 space-y-4">
+              {/* Summary Text */}
+              {data?.bias_summary && (
+                <div className="bg-white/60 p-4 rounded-lg border border-yellow-200">
+                  <SafeRenderer data={data.bias_summary} className="text-sm text-yellow-900 leading-relaxed" />
+                </div>
+              )}
+
+              {/* Statistics Grid */}
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+                <div className="bg-white/60 p-3 rounded-lg border border-yellow-200 text-center">
+                  <div className="text-2xl font-bold text-gray-900">{biasStats.total}</div>
+                  <div className="text-xs text-gray-600 mt-1">Total Biases</div>
+                </div>
+                <div className="bg-red-50 p-3 rounded-lg border border-red-200 text-center">
+                  <div className="text-2xl font-bold text-red-600">{biasStats.high}</div>
+                  <div className="text-xs text-red-600 mt-1">High Severity</div>
+                </div>
+                <div className="bg-yellow-50 p-3 rounded-lg border border-yellow-200 text-center">
+                  <div className="text-2xl font-bold text-yellow-600">{biasStats.medium}</div>
+                  <div className="text-xs text-yellow-600 mt-1">Medium Severity</div>
+                </div>
+                <div className="bg-orange-50 p-3 rounded-lg border border-orange-200 text-center">
+                  <div className="text-2xl font-bold text-orange-600">{biasStats.low}</div>
+                  <div className="text-xs text-orange-600 mt-1">Low Severity</div>
+                </div>
+              </div>
+
+              {/* Bias Type Breakdown */}
+              {Object.keys(biasStats.byType).length > 0 && (
+                <div className="bg-white/60 p-4 rounded-lg border border-yellow-200">
+                  <p className="text-xs font-semibold text-gray-700 mb-2">Bias Type Distribution:</p>
+                  <div className="grid grid-cols-2 md:grid-cols-3 gap-2">
+                    {Object.entries(biasStats.byType).map(([type, count]) => (
+                      <div key={type} className="flex items-center justify-between bg-gray-50 p-2 rounded border border-gray-200">
+                        <span className="text-xs text-gray-700 flex items-center">
+                          <span className="mr-1">{getBiasTypeIcon(type)}</span>
+                          {formatBiasType(type)}
+                        </span>
+                        <span className="text-xs font-bold text-gray-900 bg-white px-2 py-0.5 rounded">{count}</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* Additional Metrics */}
+              <div className="grid grid-cols-2 gap-3">
+                <div className="bg-white/60 p-3 rounded-lg border border-yellow-200">
+                  <div className="text-sm font-semibold text-gray-700 mb-1">Average Confidence</div>
+                  <div className="text-lg font-bold text-gray-900">{biasStats.avgConfidence}%</div>
+                </div>
+                <div className="bg-white/60 p-3 rounded-lg border border-yellow-200">
+                  <div className="text-sm font-semibold text-gray-700 mb-1">Total Limitations</div>
+                  <div className="text-lg font-bold text-gray-900">{limitations.length}</div>
+                </div>
+              </div>
+
+              {/* Overall Assessment */}
+              <div className="bg-white/60 p-4 rounded-lg border border-yellow-200">
+                <p className="text-xs font-semibold text-gray-700 mb-2">Overall Assessment:</p>
+                <div className="space-y-2">
+                  {biasStats.total === 0 && (
+                    <p className="text-sm text-green-700">✓ No significant biases detected in this study.</p>
+                  )}
+                  {biasStats.high > 0 && (
+                    <p className="text-sm text-red-700">⚠️ {biasStats.high} high-severity bias{biasStats.high > 1 ? 'es' : ''} detected. These significantly impact study validity.</p>
+                  )}
+                  {biasStats.medium > 0 && (
+                    <p className="text-sm text-yellow-700">⚠️ {biasStats.medium} medium-severity bias{biasStats.medium > 1 ? 'es' : ''} detected. These may affect study conclusions.</p>
+                  )}
+                  {limitations.length > 0 && (
+                    <p className="text-sm text-orange-700">ℹ️ {limitations.length} limitation{limitations.length > 1 ? 's' : ''} identified that may affect generalizability.</p>
+                  )}
+                  {confoundingFactors.length > 0 && (
+                    <p className="text-sm text-purple-700">ℹ️ {confoundingFactors.length} potential confounding factor{confoundingFactors.length > 1 ? 's' : ''} identified.</p>
+                  )}
+                </div>
+              </div>
             </div>
-          </div>
-        )}
-        
-        {data?.limitations && Array.isArray(data.limitations) && data.limitations.length > 0 && (
-          <div>
-            <h4 className="font-semibold text-orange-800 mb-2">Limitations</h4>
-            <ul className="space-y-1">
-              {data.limitations.slice(0, 3).map((limitation: any, index: number) => (
-                <li key={index} className="text-sm text-orange-700 flex items-start">
-                  <span className="text-orange-500 mr-2">⚠</span>
-                  <SafeRenderer data={limitation} />
-                </li>
-              ))}
-            </ul>
-          </div>
-        )}
-      </div>
-    </ErrorBoundary>
-  );
+          </details>
+
+          {/* Severity Scores Breakdown - Collapsible */}
+          {Object.keys(severityScores).length > 0 && (
+            <details className="bg-white border-2 border-gray-200 rounded-xl shadow-sm overflow-hidden">
+              <summary className="p-5 cursor-pointer hover:bg-gray-50 transition-colors list-none">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center">
+                    <svg className="w-5 h-5 text-gray-600 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" />
+                    </svg>
+                    <h4 className="font-bold text-gray-800 text-lg">Severity Scores by Bias Type</h4>
+                  </div>
+                  <svg className="w-5 h-5 text-gray-600 transition-transform duration-200" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+                  </svg>
+                </div>
+              </summary>
+              <div className="px-5 pb-5">
+                <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
+                  {Object.entries(severityScores).map(([biasType, severity]: [string, any]) => (
+                    <div key={biasType} className="bg-gray-50 p-3 rounded-lg border border-gray-200">
+                      <div className="text-xs text-gray-600 mb-1">{formatBiasType(biasType)}</div>
+                      <span className={`px-2 py-1 text-xs font-medium rounded border ${getSeverityBadgeColor(String(severity))}`}>
+                        {String(severity).toUpperCase()}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            </details>
+          )}
+
+          {/* Detected Biases - ALL OF THEM - Collapsible */}
+          {detectedBiases.length > 0 && (
+            <details className="bg-white border-2 border-red-200 rounded-xl shadow-sm overflow-hidden">
+              <summary className="p-5 cursor-pointer hover:bg-red-50/30 transition-colors list-none">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center">
+                    <svg className="w-5 h-5 text-red-600 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+                    </svg>
+                    <h4 className="font-bold text-red-900 text-lg">Detected Biases</h4>
+                  </div>
+                  <div className="flex items-center space-x-3">
+                    <span className="text-xs text-gray-500 bg-gray-100 px-3 py-1 rounded-full font-semibold">
+                      {detectedBiases.length} {detectedBiases.length === 1 ? 'Bias' : 'Biases'}
+                    </span>
+                    <svg className="w-5 h-5 text-red-600 transition-transform duration-200" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+                    </svg>
+                  </div>
+                </div>
+              </summary>
+              <div className="px-5 pb-5">
+                <div className="space-y-4">
+                {detectedBiases.map((bias: any, index: number) => {
+                  const biasType = bias.bias_type || 'unknown';
+                  const severity = bias.severity || 'unknown';
+                  const description = bias.description || '';
+                  const sectionName = bias.section_name || 'Unknown section';
+                  const evidence = bias.evidence || bias.text_excerpt || '';
+                  const impact = bias.impact || '';
+                  const confidence = bias.confidence_percentage || null;
+                  const fullSectionText = bias.full_section_text || '';
+
+                  return (
+                    <div key={index} className="bg-gradient-to-r from-red-50 to-orange-50 p-4 rounded-lg border-2 border-red-200 hover:shadow-md transition-all">
+                      {/* Bias Header */}
+                      <div className="flex items-start justify-between mb-3">
+                        <div className="flex items-center space-x-3 flex-1">
+                          <div className="flex-shrink-0 w-8 h-8 bg-red-500 text-white rounded-full flex items-center justify-center text-sm font-bold">
+                            {index + 1}
+                          </div>
+                          <div className="flex-1 min-w-0">
+                            <div className="flex items-center space-x-2 mb-1">
+                              <span className="text-xl">{getBiasTypeIcon(biasType)}</span>
+                              <h5 className="font-semibold text-gray-900 text-base">{formatBiasType(biasType)}</h5>
+                            </div>
+                            <div className="text-xs text-gray-600">
+                              <span className="font-medium">Location:</span> {sectionName}
+                            </div>
+                          </div>
+                        </div>
+                        <div className="flex flex-col items-end space-y-1 ml-3">
+                          <span className={`px-2 py-1 text-xs font-medium rounded border ${getSeverityBadgeColor(severity)}`}>
+                            {severity.toUpperCase()} Severity
+                          </span>
+                          {confidence !== null && (
+                            <span className="text-xs text-gray-600 bg-gray-100 px-2 py-0.5 rounded">
+                              {confidence}% confidence
+                            </span>
+                          )}
+                        </div>
+                      </div>
+
+                      {/* Description */}
+                      {description && (
+                        <div className="mb-3 p-3 bg-white rounded border border-red-100">
+                          <p className="text-sm font-semibold text-gray-700 mb-1">Description:</p>
+                          <p className="text-sm text-gray-700 leading-relaxed">{description}</p>
+                        </div>
+                      )}
+
+                      {/* Impact */}
+                      {impact && (
+                        <div className="mb-3 p-3 bg-orange-50 rounded border border-orange-200">
+                          <p className="text-xs font-semibold text-orange-800 mb-1">Impact on Study Validity:</p>
+                          <p className="text-sm text-orange-900 leading-relaxed">{impact}</p>
+                        </div>
+                      )}
+
+                      {/* Evidence */}
+                      {evidence && (
+                        <div className="mb-3 p-3 bg-gray-50 rounded border border-gray-200">
+                          <p className="text-xs font-semibold text-gray-700 mb-1">Evidence:</p>
+                          <p className="text-sm text-gray-700 italic leading-relaxed">{evidence}</p>
+                        </div>
+                      )}
+
+                      {/* Full Section Text (if available and different from evidence) */}
+                      {fullSectionText && fullSectionText !== evidence && fullSectionText.length > 50 && (
+                        <details className="mb-2">
+                          <summary className="text-xs font-semibold text-gray-600 cursor-pointer hover:text-gray-800 mb-2">
+                            View Full Context ({fullSectionText.length} characters)
+                          </summary>
+                          <div className="mt-2 p-3 bg-gray-50 rounded border border-gray-200 max-h-60 overflow-y-auto">
+                            <p className="text-xs text-gray-700 leading-relaxed whitespace-pre-wrap">{fullSectionText}</p>
+                          </div>
+                        </details>
+                      )}
+                    </div>
+                  );
+                })}
+                </div>
+              </div>
+            </details>
+          )}
+
+          {/* Confounding Factors - Collapsible */}
+          {confoundingFactors.length > 0 && (
+            <details className="bg-white border-2 border-purple-200 rounded-xl shadow-sm overflow-hidden">
+              <summary className="p-5 cursor-pointer hover:bg-purple-50/30 transition-colors list-none">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center">
+                    <svg className="w-5 h-5 text-purple-600 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" />
+                    </svg>
+                    <h4 className="font-bold text-purple-900 text-lg">Confounding Factors</h4>
+                  </div>
+                  <div className="flex items-center space-x-3">
+                    <span className="text-xs text-gray-500 bg-gray-100 px-3 py-1 rounded-full font-semibold">
+                      {confoundingFactors.length} {confoundingFactors.length === 1 ? 'Factor' : 'Factors'}
+                    </span>
+                    <svg className="w-5 h-5 text-purple-600 transition-transform duration-200" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+                    </svg>
+                  </div>
+                </div>
+              </summary>
+              <div className="px-5 pb-5">
+                <div className="space-y-3">
+                {confoundingFactors.map((confounder: any, index: number) => {
+                  const confounderText = typeof confounder === 'string' ? confounder : (confounder.description || confounder.text || '');
+                  const confounderImpact = typeof confounder === 'object' ? (confounder.impact || '') : '';
+                  const confounderConfidence = typeof confounder === 'object' ? (confounder.confidence_percentage || null) : null;
+
+                  if (!confounderText) return null;
+
+                  return (
+                    <div key={index} className="bg-gradient-to-r from-purple-50 to-indigo-50 p-4 rounded-lg border border-purple-200">
+                      <div className="flex items-start space-x-3">
+                        <div className="flex-shrink-0 w-6 h-6 bg-purple-500 text-white rounded-full flex items-center justify-center text-xs font-bold">
+                          {index + 1}
+                        </div>
+                        <div className="flex-1">
+                          <p className="text-sm text-gray-700 font-medium mb-1">{confounderText}</p>
+                          {confounderImpact && (
+                            <p className="text-xs text-gray-600 mt-1 italic">Impact: {confounderImpact}</p>
+                          )}
+                          {confounderConfidence !== null && (
+                            <span className="text-xs text-gray-500 mt-1 inline-block">Confidence: {confounderConfidence}%</span>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })}
+                </div>
+              </div>
+            </details>
+          )}
+
+          {/* Limitations - ALL OF THEM - Collapsible */}
+          {limitations.length > 0 && (
+            <details className="bg-white border-2 border-orange-200 rounded-xl shadow-sm overflow-hidden">
+              <summary className="p-5 cursor-pointer hover:bg-orange-50/30 transition-colors list-none">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center">
+                    <svg className="w-5 h-5 text-orange-600 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+                    </svg>
+                    <h4 className="font-bold text-orange-900 text-lg">Study Limitations</h4>
+                  </div>
+                  <div className="flex items-center space-x-3">
+                    <span className="text-xs text-gray-500 bg-gray-100 px-3 py-1 rounded-full font-semibold">
+                      {limitations.length} {limitations.length === 1 ? 'Limitation' : 'Limitations'}
+                    </span>
+                    <svg className="w-5 h-5 text-orange-600 transition-transform duration-200" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+                    </svg>
+                  </div>
+                </div>
+              </summary>
+              <div className="px-5 pb-5">
+                <div className="space-y-3">
+                {limitations.map((limitation: any, index: number) => {
+                  const limitationText = extractLimitationText(limitation);
+                  const limitationImpact = extractLimitationImpact(limitation);
+                  const limitationConfidence = extractLimitationConfidence(limitation);
+
+                  if (!limitationText || limitationText.length < 10) return null;
+
+                  return (
+                    <div key={index} className="bg-gradient-to-r from-orange-50 to-yellow-50 p-4 rounded-lg border border-orange-200 hover:shadow-md transition-all">
+                      <div className="flex items-start space-x-3">
+                        <div className="flex-shrink-0 w-6 h-6 bg-orange-500 text-white rounded-full flex items-center justify-center text-xs font-bold">
+                          {index + 1}
+                        </div>
+                        <div className="flex-1">
+                          <p className="text-sm text-gray-700 leading-relaxed font-medium mb-1">{limitationText}</p>
+                          {limitationImpact && (
+                            <p className="text-xs text-gray-600 mt-2 italic bg-white p-2 rounded border border-orange-100">
+                              <span className="font-semibold">Impact:</span> {limitationImpact}
+                            </p>
+                          )}
+                          {limitationConfidence !== null && (
+                            <span className="text-xs text-gray-500 mt-2 inline-block bg-gray-100 px-2 py-0.5 rounded">
+                              Confidence: {limitationConfidence}%
+                            </span>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })}
+                </div>
+              </div>
+            </details>
+          )}
+
+          {/* Recommendations - Collapsible */}
+          {recommendations.length > 0 && (
+            <details className="bg-white border-2 border-green-200 rounded-xl shadow-sm overflow-hidden">
+              <summary className="p-5 cursor-pointer hover:bg-green-50/30 transition-colors list-none">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center">
+                    <svg className="w-5 h-5 text-green-600 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
+                    </svg>
+                    <h4 className="font-bold text-green-900 text-lg">Recommendations</h4>
+                  </div>
+                  <div className="flex items-center space-x-3">
+                    <span className="text-xs text-gray-500 bg-gray-100 px-3 py-1 rounded-full font-semibold">
+                      {recommendations.length} {recommendations.length === 1 ? 'Recommendation' : 'Recommendations'}
+                    </span>
+                    <svg className="w-5 h-5 text-green-600 transition-transform duration-200" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+                    </svg>
+                  </div>
+                </div>
+              </summary>
+              <div className="px-5 pb-5">
+                <div className="space-y-3">
+                {recommendations.map((recommendation: any, index: number) => {
+                  const recommendationText = typeof recommendation === 'string' ? recommendation : (recommendation.text || recommendation.description || JSON.stringify(recommendation));
+
+                  return (
+                    <div key={index} className="bg-gradient-to-r from-green-50 to-emerald-50 p-4 rounded-lg border border-green-200 hover:shadow-md transition-all">
+                      <div className="flex items-start space-x-3">
+                        <div className="flex-shrink-0 w-6 h-6 bg-green-500 text-white rounded-full flex items-center justify-center text-xs font-bold">
+                          {index + 1}
+                        </div>
+                        <p className="text-sm text-gray-700 leading-relaxed flex-1">{recommendationText}</p>
+                      </div>
+                    </div>
+                  );
+                })}
+                </div>
+              </div>
+            </details>
+          )}
+
+          {/* Fallback message if no bias data */}
+          {detectedBiases.length === 0 && limitations.length === 0 && confoundingFactors.length === 0 && !data?.bias_summary && (
+            <div className="bg-gray-50 p-6 rounded-lg border border-gray-200 text-center">
+              <p className="text-sm text-gray-600">
+                No bias analysis information available for this study.
+              </p>
+            </div>
+          )}
+        </div>
+      </ErrorBoundary>
+    );
+  };
 
   const renderReproducibility = () => (
     <ErrorBoundary>
@@ -1048,6 +1507,40 @@ export default function ScrollableAnalysisSections({ data, className = '', onExp
       extractedCitations.length || 
       0;
 
+    // Helper function to build search query from citation
+    const buildSearchQuery = (citation: any): string => {
+      const parts: string[] = [];
+      
+      // Add authors if available
+      if (citation.authors && citation.authors.length > 0) {
+        parts.push(citation.authors.slice(0, 2).join(' '));
+      }
+      
+      // Add title if available
+      if (citation.title) {
+        parts.push(citation.title);
+      }
+      
+      // Add journal if available
+      if (citation.journal) {
+        parts.push(citation.journal);
+      }
+      
+      // Fallback to raw citation if nothing else is available
+      if (parts.length === 0 && citation.raw) {
+        parts.push(citation.raw);
+      }
+      
+      return parts.join(' ');
+    };
+
+    // Helper function to open web search
+    const handleSearchCitation = (citation: any) => {
+      const query = buildSearchQuery(citation);
+      const searchUrl = `https://scholar.google.com/scholar?q=${encodeURIComponent(query)}`;
+      window.open(searchUrl, '_blank', 'noopener,noreferrer');
+    };
+
     return (
       <ErrorBoundary>
         <div className="space-y-4">
@@ -1079,6 +1572,29 @@ export default function ScrollableAnalysisSections({ data, className = '', onExp
                         {citation.citation_number || index + 1}
                       </div>
                       <div className="flex-1 min-w-0">
+                        {/* Search Button */}
+                        <div className="flex justify-end mb-2">
+                          <button
+                            onClick={() => handleSearchCitation(citation)}
+                            className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-blue-600 bg-blue-50 hover:bg-blue-100 rounded-md transition-colors border border-blue-200 hover:border-blue-300"
+                            title="Search this citation on Google Scholar"
+                          >
+                            <svg 
+                              className="w-3.5 h-3.5" 
+                              fill="none" 
+                              stroke="currentColor" 
+                              viewBox="0 0 24 24"
+                            >
+                              <path 
+                                strokeLinecap="round" 
+                                strokeLinejoin="round" 
+                                strokeWidth={2} 
+                                d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" 
+                              />
+                            </svg>
+                            Search
+                          </button>
+                        </div>
                         {/* Authors */}
                         {citation.authors && citation.authors.length > 0 && (
                           <div className="mb-1">
@@ -1197,55 +1713,66 @@ export default function ScrollableAnalysisSections({ data, className = '', onExp
 
   return (
     <div className={`flex flex-col h-full ${className}`}>
-      {/* Modern Section Navigation */}
-      <div className="bg-white/80 backdrop-blur-md border-b border-gray-200/50 shadow-sm">
-        <div className="px-6 pt-5 pb-3">
-          <div className="flex items-center justify-between mb-4">
-            <h3 className="text-xl font-bold text-gray-900 flex items-center gap-2">
-              <div className="w-1 h-6 bg-gradient-to-b from-blue-500 to-indigo-600 rounded-full"></div>
-              <span>Analytics Sections</span>
-            </h3>
+      <details open className="flex flex-col h-full">
+        <summary className="bg-white/80 backdrop-blur-md border-b border-gray-200/50 shadow-sm cursor-pointer hover:bg-gray-50/50 transition-colors list-none">
+          <div className="px-6 pt-5 pb-3">
+            <div className="flex items-center justify-between mb-4">
+              <h3 className="text-xl font-bold text-gray-900 flex items-center gap-2">
+                <div className="w-1 h-6 bg-gradient-to-b from-blue-500 to-indigo-600 rounded-full"></div>
+                <span>Analytics Sections</span>
+              </h3>
+              <svg className="w-5 h-5 text-gray-600 transition-transform duration-200" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+              </svg>
+            </div>
+          </div>
+        </summary>
+        
+        <div className="flex flex-col flex-1 min-h-0">
+          {/* Modern Section Navigation */}
+          <div className="bg-white/80 backdrop-blur-md border-b border-gray-200/50 shadow-sm">
+            <div className="px-6 pt-5 pb-3">
+              {/* Modern Horizontal Scrollable Tab Bar */}
+              <div className="flex gap-2 overflow-x-auto pb-2 scrollbar-hide">
+                {sections.map((section) => (
+                  <button
+                    key={section.id}
+                    onClick={() => setActiveSection(section.id)}
+                    className={`
+                      relative px-5 py-2.5 rounded-full text-sm font-medium
+                      transition-all duration-300 ease-out
+                      whitespace-nowrap
+                      flex items-center gap-2
+                      ${activeSection === section.id 
+                        ? getColorClasses(section.color, true) + ' scale-105'
+                        : getColorClasses(section.color, false) + ' bg-white border border-gray-200 hover:border-gray-300'
+                      }
+                      ${activeSection === section.id ? 'shadow-md' : 'shadow-sm hover:shadow'}
+                    `}
+                  >
+                    <span className={`text-base transition-transform duration-300 ${activeSection === section.id ? 'scale-110' : ''}`}>
+                      {section.icon}
+                    </span>
+                    <span className="font-semibold">{section.label}</span>
+                    {activeSection === section.id && (
+                      <div className="absolute -bottom-1 left-1/2 transform -translate-x-1/2 w-1 h-1 bg-white rounded-full animate-pulse"></div>
+                    )}
+                  </button>
+                ))}
+              </div>
+            </div>
           </div>
           
-          {/* Modern Horizontal Scrollable Tab Bar */}
-          <div className="flex gap-2 overflow-x-auto pb-2 scrollbar-hide">
-            {sections.map((section) => (
-              <button
-                key={section.id}
-                onClick={() => setActiveSection(section.id)}
-                className={`
-                  relative px-5 py-2.5 rounded-full text-sm font-medium
-                  transition-all duration-300 ease-out
-                  whitespace-nowrap
-                  flex items-center gap-2
-                  ${activeSection === section.id 
-                    ? getColorClasses(section.color, true) + ' scale-105'
-                    : getColorClasses(section.color, false) + ' bg-white border border-gray-200 hover:border-gray-300'
-                  }
-                  ${activeSection === section.id ? 'shadow-md' : 'shadow-sm hover:shadow'}
-                `}
-              >
-                <span className={`text-base transition-transform duration-300 ${activeSection === section.id ? 'scale-110' : ''}`}>
-                  {section.icon}
-                </span>
-                <span className="font-semibold">{section.label}</span>
-                {activeSection === section.id && (
-                  <div className="absolute -bottom-1 left-1/2 transform -translate-x-1/2 w-1 h-1 bg-white rounded-full animate-pulse"></div>
-                )}
-              </button>
-            ))}
+          {/* Modern Section Content */}
+          <div className="flex-1 overflow-y-auto p-6 analysis-scroll bg-gradient-to-b from-gray-50/50 to-white">
+            <div className="max-w-5xl mx-auto">
+              <div className="animate-fade-in">
+                {renderSectionContent()}
+              </div>
+            </div>
           </div>
         </div>
-      </div>
-      
-      {/* Modern Section Content */}
-      <div className="flex-1 overflow-y-auto p-6 analysis-scroll bg-gradient-to-b from-gray-50/50 to-white">
-        <div className="max-w-5xl mx-auto">
-          <div className="animate-fade-in">
-            {renderSectionContent()}
-          </div>
-        </div>
-      </div>
+      </details>
     </div>
   );
 }
