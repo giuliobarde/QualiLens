@@ -21,6 +21,8 @@ sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from enhanced_scorer import EnhancedScorer
 from evidence_based_scorer import EvidenceBasedScorer
 from ..evidence_collector import EvidenceCollector
+from ..progress_tracker import get_progress_tracker, ProcessingStage
+from ..time_estimator import get_time_estimator
 
 logger = logging.getLogger(__name__)
 
@@ -109,12 +111,21 @@ class PaperAnalysisAgent(BaseAgent):
         """
         start_time = datetime.now()
         tools_used = []
+        progress_tracker = get_progress_tracker() if self.request_id else None
         
         try:
             # Determine analysis level based on query
             analysis_level = self._determine_analysis_level(query)
             logger.info(f"Starting {analysis_level} analysis for query: {query}")
             logger.info(f"Analysis level determined: {analysis_level}")
+            
+            if progress_tracker and self.request_id:
+                progress_tracker.update_stage(
+                    self.request_id,
+                    ProcessingStage.AGENT_SELECTION,
+                    message="Paper analysis agent selected",
+                    progress=10.0
+                )
             
             # Step 1: Parse PDF if needed
             text_content = None
@@ -139,6 +150,14 @@ class PaperAnalysisAgent(BaseAgent):
             # Store PDF result for later use (e.g., citations)
             pdf_result = None
             if should_parse_pdf:
+                if progress_tracker and self.request_id:
+                    progress_tracker.update_stage(
+                        self.request_id,
+                        ProcessingStage.PDF_PARSING,
+                        message="Extracting text and metadata from PDF",
+                        progress=15.0
+                    )
+                
                 pdf_result = self._parse_pdf_if_needed(classification.extracted_parameters or {})
                 if pdf_result and pdf_result.get("success"):
                     text_content = pdf_result.get("text", "")
@@ -163,6 +182,14 @@ class PaperAnalysisAgent(BaseAgent):
                         logger.info(f"Extracted {len(extracted_citations)} citations from PDF")
                     
                     tools_used.append("parse_pdf")
+                    
+                    if progress_tracker and self.request_id:
+                        progress_tracker.update_stage(
+                            self.request_id,
+                            ProcessingStage.PDF_PARSING,
+                            message=f"PDF parsed successfully ({len(pdf_pages) if pdf_pages else 0} pages)",
+                            progress=25.0
+                        )
             
             # Initialize evidence collector if we have PDF pages
             if pdf_pages:
@@ -194,6 +221,15 @@ class PaperAnalysisAgent(BaseAgent):
             # Step 2: Run analysis pipeline based on level
             logger.info(f"Running analysis pipeline for level: {analysis_level}")
             logger.info(f"Text content length: {len(text_content) if text_content else 0}")
+            
+            if progress_tracker and self.request_id:
+                progress_tracker.update_stage(
+                    self.request_id,
+                    ProcessingStage.LLM_ANALYSIS,
+                    message="Running comprehensive analysis with multiple AI tools",
+                    progress=30.0
+                )
+            
             analysis_results = self._run_analysis_pipeline(
                 text_content, analysis_level, query, evidence_collector, extracted_citations
             )
@@ -202,6 +238,14 @@ class PaperAnalysisAgent(BaseAgent):
             logger.info(f"Analysis results keys: {list(analysis_results.keys())}")
             logger.info(f"Total tools used so far: {tools_used}")
             
+            if progress_tracker and self.request_id:
+                progress_tracker.update_stage(
+                    self.request_id,
+                    ProcessingStage.EVIDENCE_COLLECTION,
+                    message="Collecting evidence and calculating scores",
+                    progress=75.0
+                )
+            
             # Step 3: Integrate results
             logger.info("Integrating analysis results...")
             integrated_result = self._integrate_analysis_results(
@@ -209,6 +253,14 @@ class PaperAnalysisAgent(BaseAgent):
             )
             logger.info(f"Integrated result keys: {list(integrated_result.keys())}")
             logger.info(f"Final tools used: {tools_used}")
+            
+            if progress_tracker and self.request_id:
+                progress_tracker.update_stage(
+                    self.request_id,
+                    ProcessingStage.COMPILING,
+                    message="Finalizing results",
+                    progress=90.0
+                )
             
             execution_time = int((datetime.now() - start_time).total_seconds() * 1000)
             

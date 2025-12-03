@@ -37,6 +37,7 @@ class BaseAgent(ABC):
         self.name = self._get_name()
         self.description = self._get_description()
         self.capabilities = self._get_capabilities()
+        self.request_id: Optional[str] = None
     
     @abstractmethod
     def _get_name(self) -> str:
@@ -95,3 +96,7 @@ class BaseAgent(ABC):
         if not tool:
             raise ValueError(f"Tool '{tool_name}' not found")
         return tool.execute(**kwargs)
+    
+    def set_request_id(self, request_id: str):
+        """Set the request ID for progress tracking."""
+        self.request_id = request_id

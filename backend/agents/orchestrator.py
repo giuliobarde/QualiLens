@@ -71,7 +71,7 @@ class AgentOrchestrator:
         
         logger.info("Initialized agents: chat_agent, paper_analysis_agent")
 
-    def process_query(self, query: str) -> OrchestratorResponse:
+    def process_query(self, query: str, request_id: Optional[str] = None) -> OrchestratorResponse:
         """
         Process a user query through the agent system.
         
@@ -107,6 +107,9 @@ class AgentOrchestrator:
             
             # Process the query with the selected agent
             try:
+                # Pass request_id to agent for progress tracking
+                if request_id:
+                    selected_agent.set_request_id(request_id)
                 agent_response = selected_agent.process_query(query, classification)
                 
                 # Update execution stats

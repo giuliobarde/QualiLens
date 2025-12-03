@@ -30,6 +30,7 @@ export default function Home() {
   const [processingType, setProcessingType] = useState<'upload' | 'analysis' | 'detailed_analysis' | 'parallel_processing'>('analysis');
   const [analysisLevel] = useState<'comprehensive'>('comprehensive');
   const [estimatedTime, setEstimatedTime] = useState<number | undefined>(undefined);
+  const [requestId, setRequestId] = useState<string | undefined>(undefined);
   const [isDragging, setIsDragging] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [selectedEvidenceId, setSelectedEvidenceId] = useState<string | null>(null);
@@ -295,6 +296,10 @@ export default function Home() {
 
     setIsLoading(true);
     
+    // Generate request ID for progress tracking
+    const newRequestId = `req_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+    setRequestId(newRequestId);
+    
     // Set processing type for text queries
     if (!attachedFile && query.toLowerCase().includes('detailed')) {
       setProcessingType('detailed_analysis');
@@ -307,14 +312,14 @@ export default function Home() {
       
       if (attachedFile) {
         // Handle file upload
-        console.log('Uploading file:', attachedFile.name);
+        console.log('Uploading file:', attachedFile.name, 'requestId:', newRequestId);
         setProcessingType('upload');
-        response = await agentService.uploadFile(attachedFile);
+        response = await agentService.uploadFile(attachedFile, newRequestId);
       } else {
         // Handle text query with comprehensive analysis
-        console.log('Processing query:', query, 'with comprehensive analysis');
+        console.log('Processing query:', query, 'with comprehensive analysis', 'requestId:', newRequestId);
         const enhancedQuery = `${query} (Analysis level: comprehensive)`;
-        response = await agentService.queryAgent({ query: enhancedQuery });
+        response = await agentService.queryAgent({ query: enhancedQuery }, newRequestId);
       }
       
       console.log('🔍 FULL RESPONSE DEBUG:');
@@ -411,6 +416,7 @@ export default function Home() {
                 fileSize={attachedFile?.size || 0}
                 processingType={processingType}
                 estimatedTime={estimatedTime}
+                requestId={requestId}
                 onComplete={() => {
                   console.log('Processing completed!');
                 }}
@@ -802,17 +808,20 @@ export default function Home() {
               const filteredEvidenceCount = analysisResult.evidence_traces.filter((e: any) => e.category !== 'research_gap').length;
               return (
               <details open className="mt-6 bg-white/95 backdrop-blur-sm rounded-2xl shadow-lg border border-gray-200/50 overflow-hidden">
-                <summary className="bg-gradient-to-r from-gray-50 to-gray-100 px-6 py-4 border-b border-gray-200 cursor-pointer hover:bg-gray-100 transition-colors list-none">
-                  <div className="flex items-center justify-between">
-                    <div>
-                      <h3 className="text-lg font-semibold text-gray-800">Evidence Visualization</h3>
-                      <p className="text-sm text-gray-600 mt-1">
-                        {filteredEvidenceCount} evidence item{filteredEvidenceCount !== 1 ? 's' : ''} found
-                      </p>
+                <summary className="bg-white/80 backdrop-blur-md border-b border-gray-200/50 shadow-sm cursor-pointer hover:bg-gray-50/50 transition-colors list-none">
+                  <div className="px-6 pt-5 pb-3">
+                    <div className="flex items-center justify-between mb-4">
+                      <h3 className="text-xl font-bold text-gray-900 flex items-center gap-2">
+                        <div className="w-1 h-6 bg-gradient-to-b from-blue-500 to-indigo-600 rounded-full"></div>
+                        <span>Evidence Visualization</span>
+                      </h3>
+                      <svg className="w-5 h-5 text-gray-600 transition-transform duration-200" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+                      </svg>
                     </div>
-                    <svg className="w-5 h-5 text-gray-600 transition-transform duration-200" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
-                    </svg>
+                    <p className="text-sm text-gray-600 ml-3">
+                      {filteredEvidenceCount} evidence item{filteredEvidenceCount !== 1 ? 's' : ''} found
+                    </p>
                   </div>
                 </summary>
                 <div>
@@ -837,9 +846,18 @@ export default function Home() {
               );
             })() : analysisResult && (
               <details className="mt-6 bg-white/95 backdrop-blur-sm rounded-2xl shadow-lg border border-gray-200/50 overflow-hidden">
-                <summary className="bg-yellow-50 border-b border-yellow-200 px-6 py-4 cursor-pointer hover:bg-yellow-100 transition-colors list-none">
-                  <div className="flex items-center justify-between">
-                    <div className="flex items-center space-x-2">
+                <summary className="bg-white/80 backdrop-blur-md border-b border-gray-200/50 shadow-sm cursor-pointer hover:bg-gray-50/50 transition-colors list-none">
+                  <div className="px-6 pt-5 pb-3">
+                    <div className="flex items-center justify-between mb-4">
+                      <h3 className="text-xl font-bold text-gray-900 flex items-center gap-2">
+                        <div className="w-1 h-6 bg-gradient-to-b from-blue-500 to-indigo-600 rounded-full"></div>
+                        <span>Evidence Visualization</span>
+                      </h3>
+                      <svg className="w-5 h-5 text-gray-600 transition-transform duration-200" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+                      </svg>
+                    </div>
+                    <div className="flex items-center space-x-2 ml-3">
                       <svg className="w-5 h-5 text-yellow-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
                       </svg>
@@ -847,9 +865,6 @@ export default function Home() {
                         No evidence traces available. Evidence visualization requires PDF analysis with evidence collection.
                       </p>
                     </div>
-                    <svg className="w-5 h-5 text-yellow-600 transition-transform duration-200" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
-                    </svg>
                   </div>
                 </summary>
               </details>

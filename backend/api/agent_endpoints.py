@@ -23,6 +23,8 @@ from agents.tools.text_section_analyzer import TextSectionAnalyzerTool
 from agents.tools.link_analyzer import LinkAnalyzerTool
 from agents.tools.general_chat import GeneralChatTool
 from agents.tools.paper_analyzer import PaperAnalyzerTool
+from agents.progress_tracker import get_progress_tracker, ProcessingStage
+from agents.time_estimator import get_time_estimator
 
 # Import new Phase 1 and Phase 2 tools
 from agents.tools.content_summarizer import ContentSummarizerTool
@@ -107,7 +109,8 @@ def agent_query():
         "user_context": {
             "filters": {},
             "preferences": {}
-        }
+        },
+        "request_id": "optional-request-id-for-progress-tracking"
     }
     """
     try:
@@ -119,8 +122,35 @@ def agent_query():
         query = data.get('query', '').strip()
         if not query:
             return jsonify({'error': 'Query parameter is required'}), 400
+        
+        # Get or create request ID for progress tracking
+        request_id = data.get('request_id')
+        progress_tracker = get_progress_tracker()
+        if not request_id:
+            request_id = progress_tracker.create_tracker()
+        else:
+            # Ensure tracker exists
+            if not progress_tracker.get_progress(request_id):
+                request_id = progress_tracker.create_tracker(request_id)
+        
+        # Estimate time
+        time_estimator = get_time_estimator()
+        estimated_time = time_estimator.estimate_total_time(
+            file_size_mb=0.0,
+            has_pdf=False,
+            num_tools=8,
+            analysis_level="comprehensive",
+            parallel_execution=True
+        )
+        progress_tracker.update_stage(
+            request_id,
+            ProcessingStage.CLASSIFYING,
+            message="Classifying query and determining analysis approach",
+            progress=5.0,
+            estimated_time_remaining=estimated_time
+        )
                 
-        logger.info(f"Processing agent query: '{query[:100]}...'")
+        logger.info(f"Processing agent query: '{query[:100]}...' (request_id: {request_id})")
         
         # Get or create agent orchestrator
         if not hasattr(current_app, 'agent_orchestrator'):
@@ -128,13 +158,22 @@ def agent_query():
         
         orchestrator = current_app.agent_orchestrator
         
+        # Set progress tracker in orchestrator context (if supported)
+        # For now, we'll pass request_id through the query context
+        if hasattr(orchestrator, 'set_progress_tracker'):
+            orchestrator.set_progress_tracker(progress_tracker, request_id)
+        
         # Process the query
         logger.info(f"Processing query with orchestrator...")
-        response = orchestrator.process_query(query)
+        response = orchestrator.process_query(query, request_id=request_id)
         logger.info(f"Orchestrator response - Success: {response.success}")
         logger.info(f"Orchestrator response - Agent used: {response.agent_used}")
         logger.info(f"Orchestrator response - Tools used: {response.tools_used}")
         logger.info(f"Orchestrator response - Result keys: {list(response.result.keys()) if response.result else 'None'}")
+        
+        # Mark progress as complete
+        progress_tracker.complete(request_id, response.success, 
+                                 "Analysis complete" if response.success else response.error_message)
         
         # Format response for frontend
         result = {
@@ -151,7 +190,8 @@ def agent_query():
             } if response.classification else None,
             'error_message': response.error_message,
             'execution_time_ms': response.execution_time_ms,
-            'timestamp': response.timestamp.isoformat()
+            'timestamp': response.timestamp.isoformat(),
+            'request_id': request_id  # Include request_id for progress tracking
         }
         
         if response.success:
@@ -306,6 +346,37 @@ def upload_file():
         if file_size == 0:
             return jsonify({'error': 'Empty file provided'}), 400
         
+        # Get or create request ID for progress tracking
+        request_id = request.form.get('request_id')
+        progress_tracker = get_progress_tracker()
+        time_estimator = get_time_estimator()
+        
+        file_size_mb = file_size / (1024 * 1024)
+        
+        # Estimate time based on file size
+        estimated_time = time_estimator.estimate_total_time(
+            file_size_mb=file_size_mb,
+            has_pdf=True,
+            num_tools=8,
+            analysis_level="comprehensive",
+            parallel_execution=True
+        )
+        
+        if not request_id:
+            request_id = progress_tracker.create_tracker()
+        else:
+            if not progress_tracker.get_progress(request_id):
+                request_id = progress_tracker.create_tracker(request_id)
+        
+        progress_tracker.update_stage(
+            request_id,
+            ProcessingStage.INITIALIZING,
+            message=f"Preparing to analyze {file.filename} ({file_size_mb:.2f} MB)",
+            progress=2.0,
+            estimated_time_remaining=estimated_time,
+            metadata={"file_name": file.filename, "file_size_mb": file_size_mb}
+        )
+        
         # Read file content
         file_content = file.read()
         
@@ -331,6 +402,15 @@ def upload_file():
             logger.info(f"Processing PDF upload with query: {query}")
             logger.info(f"Temporary file path: {temp_file_path}")
             
+            # Update progress to classifying stage
+            progress_tracker.update_stage(
+                request_id,
+                ProcessingStage.CLASSIFYING,
+                message="Classifying PDF analysis request",
+                progress=5.0,
+                estimated_time_remaining=estimated_time * 0.95
+            )
+            
             # Manually create classification with file path to ensure PDF parsing
             from agents.question_classifier import ClassificationResult, QueryType
             classification = ClassificationResult(
@@ -347,6 +427,9 @@ def upload_file():
             # Get the paper analysis agent directly
             paper_agent = orchestrator.agent_registry.get_agent("paper_analysis_agent")
             if paper_agent:
+                # Set request_id for progress tracking
+                if request_id:
+                    paper_agent.set_request_id(request_id)
                 agent_response = paper_agent.process_query(query, classification)
                 response = OrchestratorResponse(
                     success=agent_response.success,
@@ -360,7 +443,11 @@ def upload_file():
                 )
             else:
                 # Fallback to orchestrator
-                response = orchestrator.process_query(query)
+                response = orchestrator.process_query(query, request_id=request_id)
+            
+            # Mark progress as complete
+            progress_tracker.complete(request_id, response.success,
+                                     "Analysis complete" if response.success else response.error_message)
             
             # If the agent system handled it successfully, return the response
             if response.success and response.result:
@@ -379,7 +466,8 @@ def upload_file():
                     },
                     'error_message': response.error_message,
                     'execution_time_ms': response.execution_time_ms,
-                    'timestamp': response.timestamp.isoformat()
+                    'timestamp': response.timestamp.isoformat(),
+                    'request_id': request_id
                 })
             
             # If the agent system didn't handle it, fall back to direct tool usage
@@ -433,6 +521,9 @@ def upload_file():
                         'timestamp': datetime.now().isoformat()
                     }), 500
                 
+                # Mark progress as complete
+                progress_tracker.complete(request_id, True, "Analysis complete")
+                
                 # Format response
                 response_data = {
                     'success': True,
@@ -448,7 +539,8 @@ def upload_file():
                     },
                     'error_message': None,
                     'execution_time_ms': 0,
-                    'timestamp': datetime.now().isoformat()
+                    'timestamp': datetime.now().isoformat(),
+                    'request_id': request_id
                 }
                 
                 logger.info(f"PDF analysis successful for file: {file.filename}")
@@ -461,4 +553,28 @@ def upload_file():
         
     except Exception as e:
         logger.error(f"File upload error: {str(e)}")
+        return jsonify({'error': str(e)}), 500
+
+
+def get_progress():
+    """
+    Get progress for a request.
+    
+    GET /api/agent/progress?request_id=<request_id>
+    """
+    try:
+        request_id = request.args.get('request_id')
+        if not request_id:
+            return jsonify({'error': 'request_id parameter is required'}), 400
+        
+        progress_tracker = get_progress_tracker()
+        progress = progress_tracker.get_progress(request_id)
+        
+        if not progress:
+            return jsonify({'error': 'Progress not found for request_id'}), 404
+        
+        return jsonify(progress)
+        
+    except Exception as e:
+        logger.error(f"Get progress error: {str(e)}")
         return jsonify({'error': str(e)}), 500

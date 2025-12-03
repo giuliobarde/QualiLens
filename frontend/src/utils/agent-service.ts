@@ -86,9 +86,10 @@ export class AgentService extends BaseHttpClient {
   /**
    * Send a query to the agent system
    */
-  async queryAgent(request: AgentQueryRequest): Promise<AgentQueryResponse> {
+  async queryAgent(request: AgentQueryRequest, requestId?: string): Promise<AgentQueryResponse> {
     try {
-      return await this.post<AgentQueryResponse>('/api/agent/query', request);
+      const requestWithId = { ...request, request_id: requestId };
+      return await this.post<AgentQueryResponse>('/api/agent/query', requestWithId);
     } catch (error) {
       console.error('Agent query API error:', error);
       throw error;
@@ -145,13 +146,16 @@ export class AgentService extends BaseHttpClient {
   /**
    * Upload a file for analysis
    */
-  async uploadFile(file: File): Promise<AgentQueryResponse> {
+  async uploadFile(file: File, requestId?: string): Promise<AgentQueryResponse> {
     try {
       const formData = new FormData();
       formData.append('file', file);
+      if (requestId) {
+        formData.append('request_id', requestId);
+      }
       
       console.log(`Uploading file to ${API_BASE_URL}/api/agent/upload`);
-      console.log(`File name: ${file.name}, size: ${file.size} bytes`);
+      console.log(`File name: ${file.name}, size: ${file.size} bytes, requestId: ${requestId}`);
       
       const response = await fetch(`${API_BASE_URL}/api/agent/upload`, {
         method: 'POST',
@@ -175,6 +179,22 @@ export class AgentService extends BaseHttpClient {
       if (error instanceof TypeError && error.message.includes('Failed to fetch')) {
         throw new Error(`Cannot connect to backend server at ${API_BASE_URL}. Please ensure the backend is running on port 5002.`);
       }
+      throw error;
+    }
+  }
+
+  /**
+   * Get progress for a request
+   */
+  async getProgress(requestId: string): Promise<any> {
+    try {
+      const response = await fetch(`${API_BASE_URL}/api/agent/progress?request_id=${requestId}`);
+      if (!response.ok) {
+        throw new Error(`HTTP error! status: ${response.status}`);
+      }
+      return await response.json();
+    } catch (error) {
+      console.error('Get progress API error:', error);
       throw error;
     }
   }

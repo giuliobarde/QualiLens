@@ -1,12 +1,14 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
+import { agentService } from '@/utils/agent-service';
 
 interface EnhancedProgressBarProps {
   isLoading: boolean;
   fileSize: number;
   processingType: 'upload' | 'analysis' | 'detailed_analysis' | 'parallel_processing';
   estimatedTime?: number;
+  requestId?: string;
   onComplete: () => void;
 }
 
@@ -14,29 +16,67 @@ interface ProcessingStep {
   id: string;
   name: string;
   description: string;
-  duration: number; // in milliseconds
   completed: boolean;
   active: boolean;
 }
+
+interface BackendProgress {
+  request_id: string;
+  stage: string;
+  stage_name: string;
+  progress: number;
+  estimated_time_remaining?: number;
+  estimated_total_time?: number;
+  message: string;
+  start_time: string;
+  last_update: string;
+  metadata?: Record<string, any>;
+}
+
+// Map backend stages to frontend step IDs
+const STAGE_TO_STEP_ID: Record<string, string> = {
+  'initializing': 'initializing',
+  'classifying': 'classification',
+  'agent_selection': 'agent_selection',
+  'pdf_parsing': 'pdf_parsing',
+  'llm_analysis': 'llm_analysis',
+  'tool_execution': 'tool_execution',
+  'evidence_collection': 'evidence_collection',
+  'scoring': 'scoring',
+  'compiling': 'compilation',
+  'complete': 'complete',
+  'error': 'error'
+};
 
 export default function EnhancedProgressBar({
   isLoading,
   fileSize,
   processingType,
   estimatedTime,
+  requestId,
   onComplete
 }: EnhancedProgressBarProps) {
   const [currentStep, setCurrentStep] = useState(0);
   const [progress, setProgress] = useState(0);
+  const [backendProgress, setBackendProgress] = useState<BackendProgress | null>(null);
+  const [estimatedTimeRemaining, setEstimatedTimeRemaining] = useState<number | null>(null);
+  const pollingIntervalRef = useRef<NodeJS.Timeout | null>(null);
+  const hasCompletedRef = useRef(false);
 
   // Define processing steps based on backend flow
   const getProcessingSteps = (): ProcessingStep[] => {
     const baseSteps: ProcessingStep[] = [
       {
+        id: 'initializing',
+        name: 'Initializing',
+        description: 'Preparing analysis system',
+        completed: false,
+        active: false
+      },
+      {
         id: 'classification',
         name: 'Classifying Query',
         description: 'Determining the type of analysis needed',
-        duration: 1000,
         completed: false,
         active: false
       },
@@ -44,7 +84,6 @@ export default function EnhancedProgressBar({
         id: 'agent_selection',
         name: 'Selecting Agent',
         description: 'Choosing the best agent for your request',
-        duration: 500,
         completed: false,
         active: false
       }
@@ -56,57 +95,44 @@ export default function EnhancedProgressBar({
           id: 'pdf_parsing',
           name: 'Parsing PDF',
           description: 'Extracting text and metadata from document',
-          duration: Math.max(2000, fileSize / (1024 * 1024) * 1000), // Scale with file size
           completed: false,
           active: false
         },
         {
-          id: 'paper_analysis',
-          name: 'Analyzing Content',
-          description: 'Using AI to extract research insights',
-          duration: processingType === 'detailed_analysis' ? 8000 : 4000,
+          id: 'llm_analysis',
+          name: 'LLM Analysis',
+          description: 'Running comprehensive analysis with multiple AI tools',
+          completed: false,
+          active: false
+        },
+        {
+          id: 'evidence_collection',
+          name: 'Collecting Evidence',
+          description: 'Gathering evidence and calculating scores',
+          completed: false,
+          active: false
+        },
+        {
+          id: 'scoring',
+          name: 'Calculating Scores',
+          description: 'Evaluating research quality',
+          completed: false,
+          active: false
+        },
+        {
+          id: 'compilation',
+          name: 'Compiling Results',
+          description: 'Finalizing analysis results',
           completed: false,
           active: false
         }
       );
-
-      if (processingType === 'detailed_analysis') {
-        baseSteps.push(
-          {
-            id: 'section_analysis',
-            name: 'Section Analysis',
-            description: 'Analyzing methodology, results, and conclusions',
-            duration: 3000,
-            completed: false,
-            active: false
-          },
-          {
-            id: 'quality_assessment',
-            name: 'Quality Assessment',
-            description: 'Evaluating research quality and methodology',
-            duration: 2000,
-            completed: false,
-            active: false
-          }
-        );
-      }
-
-      baseSteps.push({
-        id: 'compilation',
-        name: 'Compiling Results',
-        description: 'Combining all analysis results',
-        duration: 1000,
-        completed: false,
-        active: false
-      });
     } else {
-      // For parallel processing or other types
       baseSteps.push(
         {
-          id: 'parallel_processing',
-          name: 'Parallel Processing',
-          description: 'Processing multiple components simultaneously',
-          duration: Math.max(3000, fileSize / (1024 * 1024) * 500),
+          id: 'tool_execution',
+          name: 'Processing',
+          description: 'Running analysis tools',
           completed: false,
           active: false
         }
@@ -116,79 +142,149 @@ export default function EnhancedProgressBar({
     return baseSteps;
   };
 
-  const [steps, setSteps] = useState<ProcessingStep[]>([]);
+  const [steps, setSteps] = useState<ProcessingStep[]>(getProcessingSteps());
 
+  // Poll for progress updates
+  useEffect(() => {
+    if (isLoading && requestId) {
+      // Start polling immediately
+      const pollProgress = async () => {
+        try {
+          const progressData = await agentService.getProgress(requestId);
+          setBackendProgress(progressData);
+          
+          // Update progress percentage
+          if (progressData.progress !== undefined) {
+            setProgress(progressData.progress);
+          }
+          
+          // Update estimated time remaining
+          if (progressData.estimated_time_remaining !== undefined && progressData.estimated_time_remaining !== null) {
+            setEstimatedTimeRemaining(progressData.estimated_time_remaining);
+          }
+          
+          // Update steps based on backend stage
+          const currentStage = progressData.stage;
+          const stepId = STAGE_TO_STEP_ID[currentStage] || currentStage;
+          
+          setSteps(prevSteps => {
+            const updatedSteps = prevSteps.map((step, index) => {
+              const stepIndex = prevSteps.findIndex(s => s.id === stepId);
+              
+              if (stepIndex === -1) {
+                // Stage not in our steps, keep as is
+                return step;
+              }
+              
+              return {
+                ...step,
+                active: step.id === stepId && progressData.stage !== 'complete' && progressData.stage !== 'error',
+                completed: index < stepIndex || (step.id === stepId && progressData.stage === 'complete')
+              };
+            });
+            
+            // Update current step based on updated steps
+            const activeStepIndex = updatedSteps.findIndex(s => s.id === stepId);
+            if (activeStepIndex !== -1) {
+              setCurrentStep(activeStepIndex);
+            }
+            
+            return updatedSteps;
+          });
+          
+          // Check if complete
+          if (progressData.stage === 'complete' && !hasCompletedRef.current) {
+            hasCompletedRef.current = true;
+            setProgress(100);
+            // Stop polling
+            if (pollingIntervalRef.current) {
+              clearInterval(pollingIntervalRef.current);
+              pollingIntervalRef.current = null;
+            }
+            // Call onComplete after a short delay
+            setTimeout(() => {
+              onComplete();
+            }, 500);
+          } else if (progressData.stage === 'error') {
+            // Stop polling on error
+            if (pollingIntervalRef.current) {
+              clearInterval(pollingIntervalRef.current);
+              pollingIntervalRef.current = null;
+            }
+          }
+        } catch (error) {
+          console.error('Error polling progress:', error);
+          // Continue polling even on error (might be temporary)
+        }
+      };
+      
+      // Poll immediately, then every 500ms
+      pollProgress();
+      pollingIntervalRef.current = setInterval(pollProgress, 500);
+      
+      return () => {
+        if (pollingIntervalRef.current) {
+          clearInterval(pollingIntervalRef.current);
+          pollingIntervalRef.current = null;
+        }
+      };
+    } else if (!isLoading) {
+      // Stop polling when not loading
+      if (pollingIntervalRef.current) {
+        clearInterval(pollingIntervalRef.current);
+        pollingIntervalRef.current = null;
+      }
+    }
+  }, [isLoading, requestId, onComplete]);
+
+  // Reset when loading starts
   useEffect(() => {
     if (isLoading) {
-      const newSteps = getProcessingSteps();
-      setSteps(newSteps);
-      setCurrentStep(0);
+      hasCompletedRef.current = false;
       setProgress(0);
-      startProcessing(newSteps);
+      setCurrentStep(0);
+      setBackendProgress(null);
+      setEstimatedTimeRemaining(null);
+      setSteps(getProcessingSteps());
     }
   }, [isLoading, processingType, fileSize]);
 
-  const startProcessing = async (processingSteps: ProcessingStep[]) => {
-    for (let i = 0; i < processingSteps.length; i++) {
-      // Update current step
-      setCurrentStep(i);
-      setSteps(prev => prev.map((step, index) => ({
-        ...step,
-        active: index === i,
-        completed: index < i
-      })));
-
-      // Simulate step duration
-      const stepDuration = processingSteps[i].duration;
-      const stepProgress = 100 / processingSteps.length;
-      
-      // Animate progress for this step
-      const progressInterval = setInterval(() => {
-        setProgress(prev => {
-          const newProgress = prev + (stepProgress / (stepDuration / 100));
-          return Math.min(newProgress, ((i + 1) / processingSteps.length) * 100);
-        });
-      }, 100);
-
-      await new Promise(resolve => setTimeout(resolve, stepDuration));
-      clearInterval(progressInterval);
-
-      // Mark step as completed
-      setSteps(prev => prev.map((step, index) => ({
-        ...step,
-        completed: index <= i,
-        active: false
-      })));
-    }
-
-    // Processing complete
-    setProgress(100);
-    setTimeout(() => {
-      onComplete();
-    }, 500);
-  };
-
   const getProgressMessage = () => {
+    if (backendProgress?.stage_name) {
+      return backendProgress.stage_name;
+    }
     if (steps.length === 0) return 'Initializing...';
-    
     const currentStepData = steps[currentStep];
     return currentStepData ? currentStepData.name : 'Processing...';
   };
 
   const getProgressDescription = () => {
+    if (backendProgress?.message) {
+      return backendProgress.message;
+    }
     if (steps.length === 0) return 'Preparing analysis...';
-    
     const currentStepData = steps[currentStep];
     return currentStepData ? currentStepData.description : 'Processing your request...';
   };
 
   const getEstimatedTime = () => {
+    // Use backend estimate if available
+    if (estimatedTimeRemaining !== null && estimatedTimeRemaining !== undefined) {
+      const minutes = Math.floor(estimatedTimeRemaining / 60);
+      const seconds = Math.floor(estimatedTimeRemaining % 60);
+      if (minutes > 0) {
+        return `Estimated time remaining: ${minutes}m ${seconds}s`;
+      }
+      return `Estimated time remaining: ${seconds}s`;
+    }
+    
+    // Fallback to prop estimate
     if (estimatedTime) {
       return `Estimated time: ${estimatedTime}s`;
     }
     
-    const totalDuration = steps.reduce((sum, step) => sum + step.duration, 0);
-    return `Estimated time: ${Math.ceil(totalDuration / 1000)}s`;
+    // Fallback to calculated estimate
+    return 'Calculating estimated time...';
   };
 
   return (

@@ -13,7 +13,8 @@ from api.agent_endpoints import (
     get_agent_status, 
     get_agent_tools, 
     clear_agent_cache,
-    upload_file
+    upload_file,
+    get_progress
 )
 
 # Configure logging
@@ -45,6 +46,7 @@ def create_app():
     app.add_url_rule('/api/agent/tools', 'get_agent_tools', get_agent_tools, methods=['GET'])
     app.add_url_rule('/api/agent/clear-cache', 'clear_agent_cache', clear_agent_cache, methods=['POST'])
     app.add_url_rule('/api/agent/upload', 'upload_file', upload_file, methods=['POST'])
+    app.add_url_rule('/api/agent/progress', 'get_progress', get_progress, methods=['GET'])
     
     logger.info("Flask application created successfully")
     return app
