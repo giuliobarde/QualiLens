@@ -184,6 +184,44 @@ export class AgentService extends BaseHttpClient {
   }
 
   /**
+   * Upload a file for analysis with custom rubric weights
+   */
+  async uploadFileWithWeights(formData: FormData, requestId?: string): Promise<AgentQueryResponse> {
+    try {
+      if (requestId) {
+        formData.append('request_id', requestId);
+      }
+      
+      console.log(`Uploading file to ${API_BASE_URL}/api/agent/upload`);
+      console.log(`RequestId: ${requestId}`);
+      
+      const response = await fetch(`${API_BASE_URL}/api/agent/upload`, {
+        method: 'POST',
+        body: formData,
+        // Don't set Content-Type header - let browser set it with boundary for multipart/form-data
+      });
+
+      console.log(`Upload response status: ${response.status}`);
+      
+      if (!response.ok) {
+        const errorText = await response.text();
+        console.error(`Upload failed with status ${response.status}:`, errorText);
+        throw new Error(`HTTP error! status: ${response.status}, message: ${errorText}`);
+      }
+
+      const result = await response.json();
+      console.log('Upload successful:', result);
+      return result;
+    } catch (error) {
+      console.error('File upload API error:', error);
+      if (error instanceof TypeError && error.message.includes('Failed to fetch')) {
+        throw new Error(`Cannot connect to backend server at ${API_BASE_URL}. Please ensure the backend is running on port 5002.`);
+      }
+      throw error;
+    }
+  }
+
+  /**
    * Get progress for a request
    */
   async getProgress(requestId: string): Promise<any> {

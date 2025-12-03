@@ -348,6 +348,18 @@ def upload_file():
         
         # Get or create request ID for progress tracking
         request_id = request.form.get('request_id')
+        
+        # Get rubric weights if provided
+        rubric_weights = None
+        if 'rubric_weights' in request.form:
+            try:
+                import json
+                rubric_weights = json.loads(request.form.get('rubric_weights'))
+                logger.info(f"Received custom rubric weights: {rubric_weights}")
+            except (json.JSONDecodeError, TypeError) as e:
+                logger.warning(f"Failed to parse rubric weights: {e}")
+                rubric_weights = None
+        
         progress_tracker = get_progress_tracker()
         time_estimator = get_time_estimator()
         
@@ -430,6 +442,9 @@ def upload_file():
                 # Set request_id for progress tracking
                 if request_id:
                     paper_agent.set_request_id(request_id)
+                # Set rubric weights if provided
+                if rubric_weights:
+                    paper_agent.set_rubric_weights(rubric_weights)
                 agent_response = paper_agent.process_query(query, classification)
                 response = OrchestratorResponse(
                     success=agent_response.success,

@@ -9,6 +9,7 @@ import EnhancedProgressBar from '@/components/EnhancedProgressBar';
 import CircularScoreDisplay from '@/components/CircularScoreDisplay';
 import EvidenceVisualization from '@/components/EvidenceVisualization';
 import ExportDropdown, { ExportOption } from '@/components/ExportDropdown';
+import RubricConfig, { RubricWeights } from '@/components/RubricConfig';
 
 // Dynamically import PDF viewer to avoid SSR issues with PDF.js
 const PDFViewerWithHighlights = dynamic(
@@ -38,6 +39,7 @@ export default function Home() {
   const [showHighlightDetails, setShowHighlightDetails] = useState(false);
   const [selectedHighlightEvidence, setSelectedHighlightEvidence] = useState<any>(null);
   const [isPdfExpanded, setIsPdfExpanded] = useState(false);
+  const [rubricWeights, setRubricWeights] = useState<RubricWeights | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const dropZoneRef = useRef<HTMLDivElement>(null);
   
@@ -558,7 +560,18 @@ export default function Home() {
         // Handle file upload
         console.log('Uploading file:', attachedFile.name, 'requestId:', newRequestId);
         setProcessingType('upload');
-        response = await agentService.uploadFile(attachedFile, newRequestId);
+        
+        // Include rubric weights if available
+        const formData = new FormData();
+        formData.append('file', attachedFile);
+        if (newRequestId) {
+          formData.append('request_id', newRequestId);
+        }
+        if (rubricWeights) {
+          formData.append('rubric_weights', JSON.stringify(rubricWeights));
+        }
+        
+        response = await agentService.uploadFileWithWeights(formData, newRequestId);
       } else {
         // Handle text query with comprehensive analysis
         console.log('Processing query:', query, 'with comprehensive analysis', 'requestId:', newRequestId);
@@ -792,6 +805,15 @@ export default function Home() {
                   </div>
 
 
+                  {/* Rubric Configuration */}
+                  <RubricConfig
+                    onWeightsChange={(weights) => {
+                      setRubricWeights(weights);
+                      console.log('Rubric weights updated:', weights);
+                    }}
+                    className="mb-6"
+                  />
+
                   {/* Enhanced Attached File Display */}
                   {attachedFile && (
                     <div className={`flex items-center justify-between border-2 rounded-2xl p-4 transition-all ${
@@ -995,7 +1017,15 @@ export default function Home() {
                   {/* Quality Score - 1/3 of screen */}
                   <div className="lg:col-span-1">
                     <div className="bg-white/95 backdrop-blur-sm rounded-2xl shadow-lg p-6 border border-gray-200/50 h-[calc(100vh-280px)]">
-                      <CircularScoreDisplay data={analysisResult} isExpanded={false} />
+                      <CircularScoreDisplay 
+                        data={analysisResult} 
+                        isExpanded={false}
+                        onWeightsChange={(weights) => {
+                          setRubricWeights(weights);
+                          console.log('Weights updated from score edit:', weights);
+                        }}
+                        customWeights={rubricWeights || undefined}
+                      />
                     </div>
                   </div>
                 </div>
@@ -1054,7 +1084,15 @@ export default function Home() {
 
                   {/* Quality Score - Spread Horizontally Below PDF */}
                   <div className="bg-white/95 backdrop-blur-sm rounded-2xl shadow-lg p-6 border border-gray-200/50">
-                    <CircularScoreDisplay data={analysisResult} isExpanded={true} />
+                    <CircularScoreDisplay 
+                      data={analysisResult} 
+                      isExpanded={true}
+                      onWeightsChange={(weights) => {
+                        setRubricWeights(weights);
+                        console.log('Weights updated from score edit:', weights);
+                      }}
+                      customWeights={rubricWeights || undefined}
+                    />
                   </div>
                 </div>
               )}

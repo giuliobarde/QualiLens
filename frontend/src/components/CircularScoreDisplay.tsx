@@ -1,11 +1,15 @@
 'use client';
 
 import React, { useEffect, useState, useRef } from 'react';
+import { extractComponentScores, calculateOverallScore, RubricWeights } from '@/utils/weight-calculator';
+import RubricConfig, { RubricWeights as RubricWeightsType } from '@/components/RubricConfig';
 
 interface CircularScoreDisplayProps {
   data: any;
   className?: string;
   isExpanded?: boolean;
+  onWeightsChange?: (weights: RubricWeights) => void;
+  customWeights?: RubricWeights;
 }
 
 interface ScoreBreakdown {
@@ -17,11 +21,19 @@ interface ScoreBreakdown {
   source: string;
 }
 
-export default function CircularScoreDisplay({ data, className = '', isExpanded = false }: CircularScoreDisplayProps) {
+export default function CircularScoreDisplay({ 
+  data, 
+  className = '', 
+  isExpanded = false,
+  onWeightsChange,
+  customWeights
+}: CircularScoreDisplayProps) {
   const [scoreBreakdown, setScoreBreakdown] = useState<ScoreBreakdown | null>(null);
   const [animatedScore, setAnimatedScore] = useState(0);
   const hasAnimatedRef = useRef(false);
   const lastAnimatedScoreRef = useRef<number | null>(null);
+  const [isEditingWeights, setIsEditingWeights] = useState(false);
+  const [currentWeights, setCurrentWeights] = useState<RubricWeights | null>(customWeights || null);
 
   // Comprehensive score calculation
   const calculateComprehensiveScore = (): ScoreBreakdown => {
@@ -135,6 +147,16 @@ export default function CircularScoreDisplay({ data, className = '', isExpanded 
   useEffect(() => {
     if (data) {
       const breakdown = calculateComprehensiveScore();
+      
+      // If we have custom weights, recalculate the overall score
+      if (currentWeights) {
+        const componentScores = extractComponentScores(data);
+        if (componentScores) {
+          const recalculatedOverall = calculateOverallScore(componentScores, currentWeights);
+          breakdown.overall = recalculatedOverall;
+        }
+      }
+      
       setScoreBreakdown(breakdown);
       
       // Check if this is new data (different score) or just a re-render (same score)
@@ -169,10 +191,52 @@ export default function CircularScoreDisplay({ data, className = '', isExpanded 
         setAnimatedScore(breakdown.overall);
       }
     }
-  }, [data]);
+  }, [data, currentWeights]);
+
+  // Update weights when customWeights prop changes
+  useEffect(() => {
+    if (customWeights) {
+      setCurrentWeights(customWeights);
+    }
+  }, [customWeights]);
+
+  // Recalculate overall score when weights change
+  useEffect(() => {
+    if (currentWeights && scoreBreakdown) {
+      const componentScores = extractComponentScores(data);
+      if (componentScores) {
+        const newOverall = calculateOverallScore(componentScores, currentWeights);
+        setAnimatedScore(newOverall);
+        if (scoreBreakdown) {
+          setScoreBreakdown({
+            ...scoreBreakdown,
+            overall: newOverall,
+          });
+        }
+      }
+    }
+  }, [currentWeights, data]);
 
   const score = scoreBreakdown?.overall || 0;
   const normalizedScore = Math.max(0, Math.min(100, animatedScore));
+
+  // Handle weight editing
+  const handleEditWeightsClick = () => {
+    setIsEditingWeights(true);
+  };
+
+  const handleWeightsChange = (newWeights: RubricWeightsType) => {
+    setCurrentWeights(newWeights);
+    onWeightsChange?.(newWeights);
+  };
+
+  const handleWeightsEditCancel = () => {
+    setIsEditingWeights(false);
+    // Reset to original weights if available
+    if (customWeights) {
+      setCurrentWeights(customWeights);
+    }
+  };
   
   // Calculate color based on score
   const getScoreColor = (score: number) => {
@@ -207,10 +271,31 @@ export default function CircularScoreDisplay({ data, className = '', isExpanded 
     // Horizontal spread layout for expanded view
     return (
       <div className={`${className}`}>
-        <h3 className="text-xl font-bold text-gray-800 mb-6 text-center">Overall Quality Score</h3>
-        
+        <div className="flex items-center justify-center space-x-2 mb-6">
+          <h3 className="text-xl font-bold text-gray-800">Overall Quality Score</h3>
+          {!isEditingWeights && (
+            <button
+              onClick={handleEditWeightsClick}
+              className="p-1.5 text-gray-500 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-all"
+              title="Edit scoring weights"
+            >
+              <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
+              </svg>
+            </button>
+          )}
+          {isEditingWeights && (
+            <button
+              onClick={handleWeightsEditCancel}
+              className="px-4 py-2 bg-gray-200 hover:bg-gray-300 text-gray-700 rounded-lg font-medium transition-colors"
+            >
+              Done
+            </button>
+          )}
+        </div>
+
         <div className="grid grid-cols-1 lg:grid-cols-5 gap-6 items-start">
-          {/* Main Score - Center */}
+          {/* Main Score - Left Side */}
           <div className="lg:col-span-2 flex flex-col items-center">
             <div className="relative w-40 h-40 mx-auto mb-4">
               <svg className="transform -rotate-90 w-40 h-40">
@@ -250,8 +335,16 @@ export default function CircularScoreDisplay({ data, className = '', isExpanded 
             </div>
           </div>
 
-          {/* Score Breakdown - Right Side */}
-          {scoreBreakdown && scoreBreakdown.source !== 'direct_backend_score' ? (
+          {/* Right Side - Weight Editing or Score Breakdown */}
+          {isEditingWeights ? (
+            <div className="lg:col-span-3">
+              <RubricConfig
+                initialWeights={currentWeights || undefined}
+                onWeightsChange={handleWeightsChange}
+                alwaysExpanded={true}
+              />
+            </div>
+          ) : scoreBreakdown && scoreBreakdown.source !== 'direct_backend_score' ? (
             <div className="lg:col-span-3">
               <div className="text-sm font-semibold text-gray-700 mb-4">Score Breakdown</div>
               <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
@@ -357,9 +450,40 @@ export default function CircularScoreDisplay({ data, className = '', isExpanded 
   // Default vertical layout
   return (
     <div className={`text-center ${className}`}>
-      <h3 className="text-lg font-semibold text-gray-800 mb-6">Overall Quality Score</h3>
+      {/* Weight Editing Mode - Show only rubric when editing */}
+      {isEditingWeights ? (
+        <div>
+          <div className="flex items-center justify-between mb-4">
+            <h3 className="text-lg font-semibold text-gray-800">Edit Scoring Weights</h3>
+            <button
+              onClick={handleWeightsEditCancel}
+              className="px-4 py-2 bg-gray-200 hover:bg-gray-300 text-gray-700 rounded-lg font-medium transition-colors"
+            >
+              Done
+            </button>
+          </div>
+          <RubricConfig
+            initialWeights={currentWeights || undefined}
+            onWeightsChange={handleWeightsChange}
+            alwaysExpanded={true}
+          />
+        </div>
+      ) : (
+        <>
+          <div className="flex items-center justify-center space-x-2 mb-6">
+            <h3 className="text-lg font-semibold text-gray-800">Overall Quality Score</h3>
+            <button
+              onClick={handleEditWeightsClick}
+              className="p-1.5 text-gray-500 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-all"
+              title="Edit scoring weights"
+            >
+              <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
+              </svg>
+            </button>
+          </div>
       
-      {/* Circular Progress */}
+          {/* Circular Progress */}
       <div className="relative w-48 h-48 mx-auto mb-6">
         <svg className="transform -rotate-90 w-48 h-48">
           {/* Background circle */}
@@ -437,38 +561,40 @@ export default function CircularScoreDisplay({ data, className = '', isExpanded 
         </div>
       )}
       
-      {/* Additional metrics */}
-      <div className="mt-6 grid grid-cols-2 gap-3 text-xs">
-        {data?.tools_used && (
-          <div className="bg-blue-50 p-3 rounded-xl border border-blue-200">
-            <div className="font-bold text-blue-800 text-lg">{data.tools_used.length}</div>
-            <div className="text-blue-600">Tools Used</div>
+          {/* Additional metrics */}
+          <div className="mt-6 grid grid-cols-2 gap-3 text-xs">
+            {data?.tools_used && (
+              <div className="bg-blue-50 p-3 rounded-xl border border-blue-200">
+                <div className="font-bold text-blue-800 text-lg">{data.tools_used.length}</div>
+                <div className="text-blue-600">Tools Used</div>
+              </div>
+            )}
+            
+            {data?.reproducibility_score !== undefined && (
+              <div className="bg-green-50 p-3 rounded-xl border border-green-200">
+                <div className="font-bold text-green-800 text-lg">
+                  {Math.round(data.reproducibility_score * 100)}%
+                </div>
+                <div className="text-green-600">Reproducible</div>
+              </div>
+            )}
+            
+            {data?.detected_biases && (
+              <div className="bg-red-50 p-3 rounded-xl border border-red-200">
+                <div className="font-bold text-red-800 text-lg">{data.detected_biases.length}</div>
+                <div className="text-red-600">Biases Found</div>
+              </div>
+            )}
+            
+            {data?.research_gaps && (
+              <div className="bg-yellow-50 p-3 rounded-xl border border-yellow-200">
+                <div className="font-bold text-yellow-800 text-lg">{data.research_gaps.length}</div>
+                <div className="text-yellow-600">Research Gaps</div>
+              </div>
+            )}
           </div>
-        )}
-        
-        {data?.reproducibility_score !== undefined && (
-          <div className="bg-green-50 p-3 rounded-xl border border-green-200">
-            <div className="font-bold text-green-800 text-lg">
-              {Math.round(data.reproducibility_score * 100)}%
-            </div>
-            <div className="text-green-600">Reproducible</div>
-          </div>
-        )}
-        
-        {data?.detected_biases && (
-          <div className="bg-red-50 p-3 rounded-xl border border-red-200">
-            <div className="font-bold text-red-800 text-lg">{data.detected_biases.length}</div>
-            <div className="text-red-600">Biases Found</div>
-          </div>
-        )}
-        
-        {data?.research_gaps && (
-          <div className="bg-yellow-50 p-3 rounded-xl border border-yellow-200">
-            <div className="font-bold text-yellow-800 text-lg">{data.research_gaps.length}</div>
-            <div className="text-yellow-600">Research Gaps</div>
-          </div>
-        )}
-      </div>
+        </>
+      )}
     </div>
   );
 }

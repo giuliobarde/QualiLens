@@ -48,11 +48,13 @@ class EnhancedScorer:
                             text_content: str,
                             reproducibility_data: Optional[Dict[str, Any]] = None,
                             bias_data: Optional[Dict[str, Any]] = None,
-                            research_gaps_data: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+                            research_gaps_data: Optional[Dict[str, Any]] = None,
+                            custom_weights: Optional[Dict[str, float]] = None) -> Dict[str, Any]:
         """
         Calculate final score using weighted components.
 
-        Formula: Final = (Methodology * 0.6) + (Bias * 0.2) + (Reproducibility * 0.1) + (Gaps * 0.1)
+        Formula: Final = (Methodology * w1) + (Bias * w2) + (Reproducibility * w3) + (Gaps * w4)
+        Default weights: Methodology=0.6, Bias=0.2, Reproducibility=0.1, Research_Gaps=0.1
 
         Args:
             base_methodology_score: Base score from methodology analysis (0-100)
@@ -60,11 +62,35 @@ class EnhancedScorer:
             reproducibility_data: Reproducibility analysis results
             bias_data: Bias detection results
             research_gaps_data: Research gaps identification results
+            custom_weights: Optional custom weights dict with keys: methodology, bias, reproducibility, research_gaps
 
         Returns:
             Dict with final score and detailed breakdown
         """
         try:
+            # Use custom weights if provided, otherwise use defaults
+            if custom_weights:
+                methodology_weight = custom_weights.get('methodology', self.METHODOLOGY_WEIGHT)
+                bias_weight = custom_weights.get('bias', self.BIAS_WEIGHT)
+                reproducibility_weight = custom_weights.get('reproducibility', self.REPRODUCIBILITY_WEIGHT)
+                research_gaps_weight = custom_weights.get('research_gaps', self.RESEARCH_GAPS_WEIGHT)
+                
+                # Normalize weights to sum to 1.0
+                total = methodology_weight + bias_weight + reproducibility_weight + research_gaps_weight
+                if total > 0:
+                    methodology_weight /= total
+                    bias_weight /= total
+                    reproducibility_weight /= total
+                    research_gaps_weight /= total
+                
+                logger.info(f"Using custom weights: Methodology={methodology_weight:.2f}, Bias={bias_weight:.2f}, "
+                          f"Reproducibility={reproducibility_weight:.2f}, Research_Gaps={research_gaps_weight:.2f}")
+            else:
+                methodology_weight = self.METHODOLOGY_WEIGHT
+                bias_weight = self.BIAS_WEIGHT
+                reproducibility_weight = self.REPRODUCIBILITY_WEIGHT
+                research_gaps_weight = self.RESEARCH_GAPS_WEIGHT
+            
             # Calculate component scores (all 0-100)
             methodology_score = base_methodology_score
             bias_score = self._calculate_bias_score(bias_data)
@@ -79,20 +105,20 @@ class EnhancedScorer:
 
             # Calculate weighted final score
             final_score = (
-                (methodology_score * self.METHODOLOGY_WEIGHT) +
-                (bias_score * self.BIAS_WEIGHT) +
-                (reproducibility_score * self.REPRODUCIBILITY_WEIGHT) +
-                (research_gaps_score * self.RESEARCH_GAPS_WEIGHT)
+                (methodology_score * methodology_weight) +
+                (bias_score * bias_weight) +
+                (reproducibility_score * reproducibility_weight) +
+                (research_gaps_score * research_gaps_weight)
             )
 
             # Ensure score stays within bounds
             final_score = min(100.0, max(0.0, final_score))
 
             logger.info(f"Weighted Contributions:")
-            logger.info(f"  Methodology: {methodology_score * self.METHODOLOGY_WEIGHT:.1f} pts (60%)")
-            logger.info(f"  Bias: {bias_score * self.BIAS_WEIGHT:.1f} pts (20%)")
-            logger.info(f"  Reproducibility: {reproducibility_score * self.REPRODUCIBILITY_WEIGHT:.1f} pts (10%)")
-            logger.info(f"  Research Gaps: {research_gaps_score * self.RESEARCH_GAPS_WEIGHT:.1f} pts (10%)")
+            logger.info(f"  Methodology: {methodology_score * methodology_weight:.1f} pts ({methodology_weight*100:.1f}%)")
+            logger.info(f"  Bias: {bias_score * bias_weight:.1f} pts ({bias_weight*100:.1f}%)")
+            logger.info(f"  Reproducibility: {reproducibility_score * reproducibility_weight:.1f} pts ({reproducibility_weight*100:.1f}%)")
+            logger.info(f"  Research Gaps: {research_gaps_score * research_gaps_weight:.1f} pts ({research_gaps_weight*100:.1f}%)")
             logger.info(f"  FINAL SCORE: {final_score:.1f}")
 
             return {
@@ -104,28 +130,36 @@ class EnhancedScorer:
                     "research_gaps": round(research_gaps_score, 1)
                 },
                 "weighted_contributions": {
-                    "methodology": round(methodology_score * self.METHODOLOGY_WEIGHT, 1),
-                    "bias": round(bias_score * self.BIAS_WEIGHT, 1),
-                    "reproducibility": round(reproducibility_score * self.REPRODUCIBILITY_WEIGHT, 1),
-                    "research_gaps": round(research_gaps_score * self.RESEARCH_GAPS_WEIGHT, 1)
+                    "methodology": round(methodology_score * methodology_weight, 1),
+                    "bias": round(bias_score * bias_weight, 1),
+                    "reproducibility": round(reproducibility_score * reproducibility_weight, 1),
+                    "research_gaps": round(research_gaps_score * research_gaps_weight, 1)
                 },
                 "weights": {
-                    "methodology": self.METHODOLOGY_WEIGHT,
-                    "bias": self.BIAS_WEIGHT,
-                    "reproducibility": self.REPRODUCIBILITY_WEIGHT,
-                    "research_gaps": self.RESEARCH_GAPS_WEIGHT
+                    "methodology": methodology_weight,
+                    "bias": bias_weight,
+                    "reproducibility": reproducibility_weight,
+                    "research_gaps": research_gaps_weight
                 }
             }
 
         except Exception as e:
             logger.error(f"Enhanced scoring failed: {str(e)}")
+            # Use default methodology weight on error
+            methodology_weight = custom_weights.get('methodology', self.METHODOLOGY_WEIGHT) if custom_weights else self.METHODOLOGY_WEIGHT
             return {
-                "final_score": base_methodology_score * self.METHODOLOGY_WEIGHT,
+                "final_score": round(base_methodology_score * methodology_weight, 1),
                 "component_scores": {
-                    "methodology": base_methodology_score,
+                    "methodology": round(base_methodology_score, 1),
                     "bias": 0,
                     "reproducibility": 0,
                     "research_gaps": 0
+                },
+                "weights": {
+                    "methodology": methodology_weight,
+                    "bias": custom_weights.get('bias', self.BIAS_WEIGHT) if custom_weights else self.BIAS_WEIGHT,
+                    "reproducibility": custom_weights.get('reproducibility', self.REPRODUCIBILITY_WEIGHT) if custom_weights else self.REPRODUCIBILITY_WEIGHT,
+                    "research_gaps": custom_weights.get('research_gaps', self.RESEARCH_GAPS_WEIGHT) if custom_weights else self.RESEARCH_GAPS_WEIGHT
                 },
                 "error": str(e)
             }

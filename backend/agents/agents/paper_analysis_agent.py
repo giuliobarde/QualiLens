@@ -32,6 +32,21 @@ class PaperAnalysisAgent(BaseAgent):
     Enhanced agent responsible for comprehensive paper analysis using multiple specialized tools.
     """
     
+    def __init__(self, tool_registry):
+        """Initialize the paper analysis agent."""
+        super().__init__(tool_registry)
+        self.custom_rubric_weights = None
+    
+    def set_rubric_weights(self, weights: Dict[str, float]):
+        """
+        Set custom rubric weights for scoring.
+        
+        Args:
+            weights: Dictionary with keys: methodology, bias, reproducibility, research_gaps
+        """
+        self.custom_rubric_weights = weights
+        logger.info(f"Custom rubric weights set: {weights}")
+    
     def _get_name(self) -> str:
         """Return the name of this agent."""
         return "paper_analysis_agent"
@@ -857,7 +872,8 @@ class PaperAnalysisAgent(BaseAgent):
                                 text_content=text_content,
                                 reproducibility_data=analysis_results.get("reproducibility_analysis"),
                                 bias_data=analysis_results.get("bias_analysis"),
-                                research_gaps_data=analysis_results.get("research_gap_analysis")
+                                research_gaps_data=analysis_results.get("research_gap_analysis"),
+                                custom_weights=self.custom_rubric_weights
                             )
                             integrated_result["overall_quality_score"] = enhanced_result["final_score"]
                             integrated_result["component_scores"] = enhanced_result["component_scores"]
@@ -874,7 +890,8 @@ class PaperAnalysisAgent(BaseAgent):
                         text_content=text_content,
                         reproducibility_data=analysis_results.get("reproducibility_analysis"),
                         bias_data=analysis_results.get("bias_analysis"),
-                        research_gaps_data=analysis_results.get("research_gap_analysis")
+                        research_gaps_data=analysis_results.get("research_gap_analysis"),
+                        custom_weights=self.custom_rubric_weights
                     )
                     integrated_result["overall_quality_score"] = enhanced_result["final_score"]
                     integrated_result["component_scores"] = enhanced_result["component_scores"]
