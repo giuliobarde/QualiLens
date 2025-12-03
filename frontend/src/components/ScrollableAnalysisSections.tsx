@@ -1160,28 +1160,36 @@ export default function ScrollableAnalysisSections({ data, className = '', onExp
         )}
 
         {/* Reproducibility Score */}
-        {data?.reproducibility_score !== undefined && (
-          <div className="bg-indigo-50 p-4 rounded-lg">
-            <h4 className="font-semibold text-indigo-800 mb-2">Reproducibility Score</h4>
-            <div className="flex items-center space-x-3">
-              <div className="text-2xl font-bold text-indigo-600">
-                {Math.round(data.reproducibility_score * 100)}%
-              </div>
-              <div className="flex-1">
-                <div className="w-full bg-gray-200 rounded-full h-2">
-                  <div 
-                    className={`h-2 rounded-full ${
-                      data.reproducibility_score >= 0.8 ? 'bg-green-500' :
-                      data.reproducibility_score >= 0.6 ? 'bg-yellow-500' :
-                      'bg-red-500'
-                    }`}
-                    style={{ width: `${data.reproducibility_score * 100}%` }}
-                  ></div>
+        {data?.reproducibility_score !== undefined && (() => {
+          // Normalize score to 0-100 range
+          const normalizedScore = data.reproducibility_score <= 1.0 
+            ? data.reproducibility_score * 100 
+            : data.reproducibility_score;
+          const scorePercent = normalizedScore / 100;
+          
+          return (
+            <div className="bg-indigo-50 p-4 rounded-lg">
+              <h4 className="font-semibold text-indigo-800 mb-2">Reproducibility Score</h4>
+              <div className="flex items-center space-x-3">
+                <div className="text-2xl font-bold text-indigo-600">
+                  {Math.round(normalizedScore)}%
+                </div>
+                <div className="flex-1">
+                  <div className="w-full bg-gray-200 rounded-full h-2">
+                    <div 
+                      className={`h-2 rounded-full ${
+                        scorePercent >= 0.8 ? 'bg-green-500' :
+                        scorePercent >= 0.6 ? 'bg-yellow-500' :
+                        'bg-red-500'
+                      }`}
+                      style={{ width: `${scorePercent * 100}%` }}
+                    ></div>
+                  </div>
                 </div>
               </div>
             </div>
-          </div>
-        )}
+          );
+        })()}
         
         {/* Data Availability */}
         {data?.data_availability && (

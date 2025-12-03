@@ -133,9 +133,20 @@ export function calculateOverallScore(
 
 /**
  * Extract component scores from analysis result data
+ * Backend now always provides component_scores, so this is the primary source
  */
 export function extractComponentScores(data: any): ComponentScores | null {
-  // Try to get scores from quality_breakdown
+  // Primary: Get from component_scores (backend always provides this now)
+  if (data?.component_scores) {
+    return {
+      methodology: data.component_scores.methodology || 0,
+      bias: data.component_scores.bias || 0,
+      reproducibility: data.component_scores.reproducibility || 0,
+      research_gaps: data.component_scores.research_gaps || 0,
+    };
+  }
+
+  // Fallback: Try to get scores from quality_breakdown (legacy support)
   if (data?.quality_breakdown) {
     const breakdown = data.quality_breakdown;
     return {
@@ -143,16 +154,6 @@ export function extractComponentScores(data: any): ComponentScores | null {
       bias: breakdown.bias?.score || 0,
       reproducibility: breakdown.reproducibility?.score || 0,
       research_gaps: breakdown.research_gaps?.score || 0,
-    };
-  }
-
-  // Try to get from component_scores
-  if (data?.component_scores) {
-    return {
-      methodology: data.component_scores.methodology || 0,
-      bias: data.component_scores.bias || 0,
-      reproducibility: data.component_scores.reproducibility || 0,
-      research_gaps: data.component_scores.research_gaps || 0,
     };
   }
 
@@ -175,7 +176,10 @@ export function extractComponentScores(data: any): ComponentScores | null {
 
   // Reproducibility
   if (data?.reproducibility_score !== undefined) {
-    reproducibility = data.reproducibility_score * 100;
+    // Normalize to 0-100 range (backend may return 0-1 or 0-100)
+    reproducibility = data.reproducibility_score <= 1.0 
+      ? data.reproducibility_score * 100 
+      : data.reproducibility_score;
   }
 
   // Research Gaps (based on count)

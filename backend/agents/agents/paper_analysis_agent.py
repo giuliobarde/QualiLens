@@ -726,6 +726,23 @@ class PaperAnalysisAgent(BaseAgent):
                 integrated_result["bias_summary"] = bias_data.get("bias_summary", "")
                 integrated_result["limitations"] = bias_data.get("limitations", [])
                 integrated_result["confounding_factors"] = bias_data.get("confounding_factors", [])
+                
+                # Calculate bias score (inverted - fewer biases = higher score)
+                detected_biases = bias_data.get("detected_biases", [])
+                bias_score = 100.0  # Start with perfect score
+                for bias in detected_biases:
+                    severity = bias.get("severity", "medium")
+                    if severity == "high":
+                        bias_score -= 20.0
+                    elif severity == "medium":
+                        bias_score -= 10.0
+                    elif severity == "low":
+                        bias_score -= 5.0
+                bias_score = max(0.0, bias_score)
+                
+                if not integrated_result.get("component_scores"):
+                    integrated_result["component_scores"] = {}
+                integrated_result["component_scores"]["bias"] = bias_score
             
             # Add methodology analysis if available
             if "methodology_analysis" in analysis_results:
@@ -763,12 +780,16 @@ class PaperAnalysisAgent(BaseAgent):
                     "content_hash": methodology_data.get("content_hash")
                 }
 
-                # Add the overall quality score from methodology analysis
-                if methodology_data.get("overall_quality_score"):
-                    integrated_result["overall_quality_score"] = methodology_data.get("overall_quality_score")
-                    logger.info(f"✅ SET overall_quality_score to: {methodology_data.get('overall_quality_score')}")
+                # Extract component scores from methodology analysis
+                # Note: We don't set overall_quality_score - frontend will calculate it
+                if methodology_data.get("quantitative_scores", {}).get("scores"):
+                    methodology_score = methodology_data["quantitative_scores"]["scores"].get("overall_score", 0.0)
+                    if not integrated_result.get("component_scores"):
+                        integrated_result["component_scores"] = {}
+                    integrated_result["component_scores"]["methodology"] = methodology_score
+                    logger.info(f"✅ SET methodology component score: {methodology_score}")
                 else:
-                    logger.warning(f"⚠️ NO overall_quality_score found in methodology_data")
+                    logger.warning(f"⚠️ NO methodology scores found in methodology_data")
             
             # Add statistical analysis if available
             if "statistical_analysis" in analysis_results:
@@ -781,7 +802,16 @@ class PaperAnalysisAgent(BaseAgent):
             # Add reproducibility analysis if available
             if "reproducibility_analysis" in analysis_results:
                 reproducibility_data = analysis_results["reproducibility_analysis"]
-                integrated_result["reproducibility_score"] = reproducibility_data.get("reproducibility_score", 0.0)
+                reproducibility_score = reproducibility_data.get("reproducibility_score", 0.0)
+                # Convert from 0-1 scale to 0-100 if needed
+                if reproducibility_score <= 1.0:
+                    reproducibility_score = reproducibility_score * 100.0
+                
+                if not integrated_result.get("component_scores"):
+                    integrated_result["component_scores"] = {}
+                integrated_result["component_scores"]["reproducibility"] = reproducibility_score
+                
+                integrated_result["reproducibility_score"] = reproducibility_score
                 integrated_result["reproducibility_barriers"] = reproducibility_data.get("reproducibility_barriers", [])
                 integrated_result["data_availability"] = reproducibility_data.get("data_availability", "")
                 integrated_result["code_availability"] = reproducibility_data.get("code_availability", "")
@@ -796,6 +826,24 @@ class PaperAnalysisAgent(BaseAgent):
                 integrated_result["unaddressed_questions"] = gap_data.get("unaddressed_questions", [])
                 integrated_result["methodological_gaps"] = gap_data.get("methodological_gaps", [])
                 integrated_result["theoretical_gaps"] = gap_data.get("theoretical_gaps", [])
+                
+                # Calculate research gaps score (more gaps = higher score)
+                research_gaps = gap_data.get("research_gaps", [])
+                gaps_count = len(research_gaps)
+                if gaps_count == 0:
+                    research_gaps_score = 0.0
+                elif gaps_count <= 2:
+                    research_gaps_score = 40.0
+                elif gaps_count <= 5:
+                    research_gaps_score = 70.0
+                elif gaps_count <= 10:
+                    research_gaps_score = 90.0
+                else:
+                    research_gaps_score = 100.0
+                
+                if not integrated_result.get("component_scores"):
+                    integrated_result["component_scores"] = {}
+                integrated_result["component_scores"]["research_gaps"] = research_gaps_score
             
             # Add citation analysis if available
             if "citation_analysis" in analysis_results:
@@ -809,16 +857,19 @@ class PaperAnalysisAgent(BaseAgent):
                 integrated_result["extracted_citations"] = citation_data.get("extracted_citations", [])
                 integrated_result["citation_analysis"] = citation_data  # Keep full citation_analysis object
             
-            # Add quality assessment if available (but don't override methodology score)
+            # Add quality assessment if available - extract component scores
             if "quality_assessment" in analysis_results:
                 quality_data = analysis_results["quality_assessment"]
 
-                # Only use quality assessor score if no methodology score exists
-                if not integrated_result.get("overall_quality_score") or integrated_result.get("overall_quality_score") == 0:
-                    integrated_result["overall_quality_score"] = quality_data.get("overall_quality_score", 0.0)
-                    logger.info(f"⚠️ Using quality assessor score: {quality_data.get('overall_quality_score', 0.0)}")
-                else:
-                    logger.info(f"✅ Keeping methodology analyzer score: {integrated_result.get('overall_quality_score')} (ignoring quality assessor: {quality_data.get('overall_quality_score', 0.0)})")
+                # Extract component scores from quality assessor
+                if quality_data.get("component_scores"):
+                    if not integrated_result.get("component_scores"):
+                        integrated_result["component_scores"] = {}
+                    # Merge component scores, preferring methodology from methodology analyzer if available
+                    for key, value in quality_data["component_scores"].items():
+                        if key not in integrated_result["component_scores"]:
+                            integrated_result["component_scores"][key] = value
+                    logger.info(f"✅ Merged component scores from quality assessor: {quality_data.get('component_scores')}")
 
                 integrated_result["quality_breakdown"] = quality_data.get("quality_breakdown", {})
                 integrated_result["quality_strengths"] = quality_data.get("strengths", [])
@@ -827,10 +878,12 @@ class PaperAnalysisAgent(BaseAgent):
                 integrated_result["quality_confidence_level"] = quality_data.get("confidence_level", "")
                 integrated_result["scoring_criteria_used"] = quality_data.get("scoring_criteria_used", [])
 
-            # PHASE 2: Apply Evidence-Based Scoring
-            logger.info("🎯 Applying Evidence-Based Scoring")
-            base_score = integrated_result.get("overall_quality_score", 0.0)
-
+            # PHASE 2: Ensure component scores are complete
+            logger.info("🎯 Ensuring component scores are complete")
+            
+            # Get base methodology score from component_scores if available
+            base_methodology_score = integrated_result.get("component_scores", {}).get("methodology", 0.0)
+            
             # Get evidence items for scoring
             evidence_list = []
             if evidence_collector:
@@ -839,69 +892,82 @@ class PaperAnalysisAgent(BaseAgent):
 
             if len(evidence_list) > 0:
                 try:
-                    # Use evidence-based scorer
+                    # Use evidence-based scorer to get component scores
                     evidence_scorer = EvidenceBasedScorer()
                     evidence_result = evidence_scorer.calculate_score_from_evidence(
                         evidence_items=evidence_list,
-                        base_methodology_score=base_score if base_score > 0 else None
+                        base_methodology_score=base_methodology_score if base_methodology_score > 0 else None
                     )
 
-                    # Update with evidence-based score
-                    integrated_result["overall_quality_score"] = evidence_result["final_score"]
-                    integrated_result["base_methodology_score"] = base_score
-                    integrated_result["component_scores"] = evidence_result["component_scores"]
+                    # Update component scores (don't set overall_quality_score - frontend will calculate)
+                    if not integrated_result.get("component_scores"):
+                        integrated_result["component_scores"] = {}
+                    integrated_result["component_scores"].update(evidence_result["component_scores"])
                     integrated_result["weighted_contributions"] = evidence_result["weighted_contributions"]
                     integrated_result["scoring_weights"] = evidence_result["weights"]
                     integrated_result["evidence_contributions"] = evidence_result.get("evidence_contributions", [])
                     integrated_result["evidence_count"] = evidence_result.get("evidence_count", 0)
 
-                    logger.info(f"✅ Evidence-based scoring applied:")
-                    logger.info(f"   Methodology: {evidence_result['component_scores']['methodology']} × 60% = {evidence_result['weighted_contributions']['methodology']:.1f} pts")
-                    logger.info(f"   Bias: {evidence_result['component_scores']['bias']} × 20% = {evidence_result['weighted_contributions']['bias']:.1f} pts")
-                    logger.info(f"   Reproducibility: {evidence_result['component_scores']['reproducibility']} × 10% = {evidence_result['weighted_contributions']['reproducibility']:.1f} pts")
-                    logger.info(f"   Statistics: {evidence_result['component_scores']['statistics']} × 10% = {evidence_result['weighted_contributions']['statistics']:.1f} pts")
-                    logger.info(f"   FINAL SCORE: {evidence_result['final_score']:.1f}/100")
+                    logger.info(f"✅ Evidence-based component scores applied:")
+                    logger.info(f"   Methodology: {evidence_result['component_scores']['methodology']}")
+                    logger.info(f"   Bias: {evidence_result['component_scores']['bias']}")
+                    logger.info(f"   Reproducibility: {evidence_result['component_scores']['reproducibility']}")
                     logger.info(f"   Evidence items: {len(evidence_list)}")
 
                 except Exception as e:
                     logger.error(f"Evidence-based scoring failed: {str(e)}")
                     # Fallback to enhanced scorer if evidence-based fails
-                    if base_score > 0:
+                    if base_methodology_score > 0:
                         try:
                             enhanced_scorer = EnhancedScorer()
                             enhanced_result = enhanced_scorer.calculate_final_score(
-                                base_methodology_score=base_score,
+                                base_methodology_score=base_methodology_score,
                                 text_content=text_content,
                                 reproducibility_data=analysis_results.get("reproducibility_analysis"),
                                 bias_data=analysis_results.get("bias_analysis"),
                                 research_gaps_data=analysis_results.get("research_gap_analysis"),
                                 custom_weights=self.custom_rubric_weights
                             )
-                            integrated_result["overall_quality_score"] = enhanced_result["final_score"]
-                            integrated_result["component_scores"] = enhanced_result["component_scores"]
+                            if not integrated_result.get("component_scores"):
+                                integrated_result["component_scores"] = {}
+                            integrated_result["component_scores"].update(enhanced_result["component_scores"])
                             integrated_result["weighted_contributions"] = enhanced_result["weighted_contributions"]
                         except Exception as e2:
                             logger.error(f"Fallback enhanced scoring also failed: {str(e2)}")
-                            logger.info("Continuing with base methodology score")
-            elif base_score > 0:
-                # No evidence collected, use enhanced scorer as fallback
+                            logger.info("Continuing with available component scores")
+            elif base_methodology_score > 0:
+                # No evidence collected, use enhanced scorer as fallback to get component scores
                 try:
                     enhanced_scorer = EnhancedScorer()
                     enhanced_result = enhanced_scorer.calculate_final_score(
-                        base_methodology_score=base_score,
+                        base_methodology_score=base_methodology_score,
                         text_content=text_content,
                         reproducibility_data=analysis_results.get("reproducibility_analysis"),
                         bias_data=analysis_results.get("bias_analysis"),
                         research_gaps_data=analysis_results.get("research_gap_analysis"),
                         custom_weights=self.custom_rubric_weights
                     )
-                    integrated_result["overall_quality_score"] = enhanced_result["final_score"]
-                    integrated_result["component_scores"] = enhanced_result["component_scores"]
+                    if not integrated_result.get("component_scores"):
+                        integrated_result["component_scores"] = {}
+                    integrated_result["component_scores"].update(enhanced_result["component_scores"])
                     integrated_result["weighted_contributions"] = enhanced_result["weighted_contributions"]
-                    logger.info("⚠️ No evidence collected, using enhanced scorer fallback")
+                    logger.info("⚠️ No evidence collected, using enhanced scorer fallback for component scores")
                 except Exception as e:
                     logger.error(f"Enhanced scoring failed: {str(e)}")
-                    logger.info("Continuing with base methodology score")
+                    logger.info("Continuing with available component scores")
+            
+            # Ensure component_scores has all required fields with defaults if missing
+            if not integrated_result.get("component_scores"):
+                integrated_result["component_scores"] = {}
+            component_scores = integrated_result["component_scores"]
+            if "methodology" not in component_scores:
+                component_scores["methodology"] = 0.0
+            if "bias" not in component_scores:
+                component_scores["bias"] = 0.0
+            if "reproducibility" not in component_scores:
+                component_scores["reproducibility"] = 0.0
+            if "research_gaps" not in component_scores:
+                component_scores["research_gaps"] = 0.0
 
             # Generate overall assessment
             integrated_result["overall_assessment"] = self._generate_overall_assessment(analysis_results)

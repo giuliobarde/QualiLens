@@ -1021,7 +1021,7 @@ export default function Home() {
                 <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
                   {/* Paper Display - 2/3 of screen */}
                   <div className="lg:col-span-2">
-                    <div className="bg-white/95 backdrop-blur-sm rounded-2xl shadow-lg overflow-hidden border border-gray-200/50 h-[calc(100vh-280px)]">
+                    <div className="bg-white/95 backdrop-blur-sm rounded-2xl shadow-lg overflow-hidden border border-gray-200/50 h-[calc(100vh-260px)]">
                       <div className="bg-gradient-to-r from-gray-50 to-gray-100 px-6 py-4 border-b border-gray-200">
                         <div className="flex items-center justify-between">
                           <div className="flex items-center space-x-3">
@@ -1078,7 +1078,7 @@ export default function Home() {
 
                   {/* Quality Score - 1/3 of screen */}
                   <div className="lg:col-span-1">
-                    <div className="bg-white/95 backdrop-blur-sm rounded-2xl shadow-lg p-6 border border-gray-200/50 h-[calc(100vh-280px)]">
+                    <div className="bg-white/95 backdrop-blur-sm rounded-2xl shadow-lg p-6 border border-gray-200/50 h-[calc(100vh-260px)]">
                       <CircularScoreDisplay 
                         data={analysisResult} 
                         isExpanded={false}
@@ -1095,7 +1095,7 @@ export default function Home() {
                 /* Expanded Layout: PDF full width, Quality Score below */
                 <div className="space-y-6">
                   {/* PDF Viewer - Full Width and Taller */}
-                  <div className="bg-white/95 backdrop-blur-sm rounded-2xl shadow-lg overflow-hidden border border-gray-200/50 h-[calc(100vh-150px)]">
+                  <div className="bg-white/95 backdrop-blur-sm rounded-2xl shadow-lg overflow-hidden border border-gray-200/50 h-[calc(100vh-140px)]">
                     <div className="bg-gradient-to-r from-gray-50 to-gray-100 px-6 py-4 border-b border-gray-200">
                       <div className="flex items-center justify-between">
                         <div className="flex items-center space-x-3">

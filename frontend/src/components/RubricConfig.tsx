@@ -64,8 +64,18 @@ export default function RubricConfig({
   };
 
   const resetToDefaults = () => {
-    setWeights({ ...DEFAULT_WEIGHTS });
-    onWeightsChange?.(DEFAULT_WEIGHTS);
+    // Check if weights are already at defaults (within small tolerance for floating point)
+    const isAlreadyDefault = 
+      Math.abs(weights.methodology - DEFAULT_WEIGHTS.methodology) < 0.001 &&
+      Math.abs(weights.bias - DEFAULT_WEIGHTS.bias) < 0.001 &&
+      Math.abs(weights.reproducibility - DEFAULT_WEIGHTS.reproducibility) < 0.001 &&
+      Math.abs(weights.research_gaps - DEFAULT_WEIGHTS.research_gaps) < 0.001;
+    
+    if (!isAlreadyDefault) {
+      setWeights({ ...DEFAULT_WEIGHTS });
+      onWeightsChange?.(DEFAULT_WEIGHTS);
+    }
+    // If already at defaults, don't trigger a change (prevents unnecessary recalculation)
   };
 
   const total = Object.values(weights).reduce((a, b) => a + b, 0);

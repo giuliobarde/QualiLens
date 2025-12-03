@@ -308,8 +308,17 @@ class ReproducibilityAssessorTool(BaseTool):
                 # Evidence (0-0.70) + LLM supplement (0-0.20) + methodology adjustment
                 llm_supplement = min(0.20, raw_score * 0.20)  # LLM contributes up to 0.20
                 base_score = evidence_score + llm_supplement
-                final_score = max(0.30, min(1.0, base_score + methodology_adjustment * 0.2))
-                logger.info(f"📊 Strong evidence mode: evidence={evidence_score:.2f}, LLM supplement={llm_supplement:.2f}, final={final_score:.2f}")
+                
+                # For very strong evidence (>= 0.50), ensure we get a high score
+                if evidence_score >= 0.50:
+                    # With very strong evidence, ensure minimum score reflects the evidence
+                    # Evidence 0.50-0.70 should result in 0.60-0.90+ final score
+                    methodology_boost = max(0.0, methodology_adjustment * 0.3)  # More weight for methodology when evidence is strong
+                    final_score = max(0.60, min(1.0, base_score + methodology_boost))
+                    logger.info(f"📊 Very strong evidence mode: evidence={evidence_score:.2f}, LLM supplement={llm_supplement:.2f}, methodology boost={methodology_boost:.2f}, final={final_score:.2f}")
+                else:
+                    final_score = max(0.30, min(1.0, base_score + methodology_adjustment * 0.2))
+                    logger.info(f"📊 Strong evidence mode: evidence={evidence_score:.2f}, LLM supplement={llm_supplement:.2f}, final={final_score:.2f}")
                 
             elif evidence_score >= 0.20:
                 # Moderate evidence - balanced approach
@@ -537,10 +546,18 @@ class ReproducibilityAssessorTool(BaseTool):
         if indicators.get("data_repositories"):
             num_repos = len(indicators["data_repositories"])
             # Multiple repositories = better (up to 0.25)
-            if num_repos >= 2:
-                score += 0.25  # Multiple data sources
+            # Scale more granularly based on number of repositories
+            if num_repos >= 10:
+                score += 0.25  # Excellent - many data sources (full points)
+            elif num_repos >= 5:
+                score += 0.24  # Very good - many sources
+            elif num_repos >= 3:
+                score += 0.23  # Good - multiple sources
+            elif num_repos >= 2:
+                score += 0.22  # Multiple data sources
             else:
                 score += 0.20  # Single data source
+            logger.info(f"📊 Data repositories: {num_repos} found, score contribution: {score:.3f}")
         else:
             score += 0.0
         

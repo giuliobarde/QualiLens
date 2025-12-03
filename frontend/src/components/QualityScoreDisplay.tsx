@@ -116,7 +116,10 @@ export default function QualityScoreDisplay({ data, className = '' }: QualitySco
     
     // Reproducibility score
     if (data?.reproducibility_score !== undefined) {
-      const reproScore = data.reproducibility_score * 100;
+      // Normalize to 0-100 range (backend may return 0-1 or 0-100)
+      const reproScore = data.reproducibility_score <= 1.0 
+        ? data.reproducibility_score * 100 
+        : data.reproducibility_score;
       scores.reproducibility = reproScore;
       totalScore += reproScore;
       count++;
@@ -311,7 +314,7 @@ export default function QualityScoreDisplay({ data, className = '' }: QualitySco
         {data?.reproducibility_score !== undefined && (
           <div className="bg-green-50 p-2 rounded">
             <div className="font-semibold text-green-800">
-              {Math.round(data.reproducibility_score * 100)}%
+              {Math.round(data.reproducibility_score <= 1.0 ? data.reproducibility_score * 100 : data.reproducibility_score)}%
             </div>
             <div className="text-green-600">Reproducible</div>
           </div>

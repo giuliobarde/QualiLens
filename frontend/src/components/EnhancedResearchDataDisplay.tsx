@@ -561,33 +561,41 @@ export default function EnhancedResearchDataDisplay({ data, className = '' }: En
   const renderReproducibility = () => (
     <div className="space-y-6">
       {/* Reproducibility Score */}
-      {data.reproducibility_score !== undefined && (
-        <div className="bg-white p-6 rounded-lg border border-gray-200">
-          <h3 className="text-xl font-semibold text-gray-800 mb-3">Reproducibility Score</h3>
-          <div className="flex items-center space-x-4">
-            <div className="text-3xl font-bold text-blue-600">
-              {Math.round(data.reproducibility_score * 100)}%
-            </div>
-            <div className="flex-1">
-              <div className="w-full bg-gray-200 rounded-full h-4">
-                <div 
-                  className={`h-4 rounded-full ${
-                    data.reproducibility_score >= 0.8 ? 'bg-green-500' :
-                    data.reproducibility_score >= 0.6 ? 'bg-yellow-500' :
-                    'bg-red-500'
-                  }`}
-                  style={{ width: `${data.reproducibility_score * 100}%` }}
-                ></div>
+      {data.reproducibility_score !== undefined && (() => {
+        // Normalize score to 0-100 range
+        const normalizedScore = data.reproducibility_score <= 1.0 
+          ? data.reproducibility_score * 100 
+          : data.reproducibility_score;
+        const scorePercent = normalizedScore / 100;
+        
+        return (
+          <div className="bg-white p-6 rounded-lg border border-gray-200">
+            <h3 className="text-xl font-semibold text-gray-800 mb-3">Reproducibility Score</h3>
+            <div className="flex items-center space-x-4">
+              <div className="text-3xl font-bold text-blue-600">
+                {Math.round(normalizedScore)}%
               </div>
-              <p className="text-sm text-gray-600 mt-1">
-                {data.reproducibility_score >= 0.8 ? 'High Reproducibility' :
-                 data.reproducibility_score >= 0.6 ? 'Medium Reproducibility' :
-                 'Low Reproducibility'}
-              </p>
+              <div className="flex-1">
+                <div className="w-full bg-gray-200 rounded-full h-4">
+                  <div 
+                    className={`h-4 rounded-full ${
+                      scorePercent >= 0.8 ? 'bg-green-500' :
+                      scorePercent >= 0.6 ? 'bg-yellow-500' :
+                      'bg-red-500'
+                    }`}
+                    style={{ width: `${scorePercent * 100}%` }}
+                  ></div>
+                </div>
+                <p className="text-sm text-gray-600 mt-1">
+                  {scorePercent >= 0.8 ? 'High Reproducibility' :
+                   scorePercent >= 0.6 ? 'Medium Reproducibility' :
+                   'Low Reproducibility'}
+                </p>
+              </div>
             </div>
           </div>
-        </div>
-      )}
+        );
+      })()}
 
       {/* Data Availability */}
       {data.data_availability && (

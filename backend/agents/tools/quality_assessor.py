@@ -83,21 +83,28 @@ class QualityAssessorTool(BaseTool):
             # Calculate quality scores for each dimension
             quality_scores = self._calculate_quality_dimensions(analysis_results, weights)
             
-            # Calculate overall weighted score
-            overall_score = self._calculate_overall_score(quality_scores, weights)
-            
             # Debug logging
             logger.info(f"🔍 QUALITY ASSESSOR SCORES:")
             logger.info(f"   - methodology score: {quality_scores.get('methodology', {}).get('score', 'N/A')}")
-            logger.info(f"   - overall_score: {overall_score}")
+            logger.info(f"   - bias score: {quality_scores.get('bias', {}).get('score', 'N/A')}")
+            logger.info(f"   - reproducibility score: {quality_scores.get('reproducibility', {}).get('score', 'N/A')}")
             logger.info(f"   - quality_scores: {quality_scores}")
             
-            # Generate quality assessment
-            assessment = self._generate_quality_assessment(quality_scores, overall_score, analysis_results)
+            # Generate quality assessment (using average for assessment generation only)
+            avg_score = sum(dim["score"] for dim in quality_scores.values()) / len(quality_scores) if quality_scores else 0.0
+            assessment = self._generate_quality_assessment(quality_scores, avg_score, analysis_results)
+            
+            # Extract component scores in standardized format
+            component_scores = {
+                "methodology": quality_scores.get("methodology", {}).get("score", 0.0),
+                "bias": quality_scores.get("bias", {}).get("score", 0.0),
+                "reproducibility": quality_scores.get("reproducibility", {}).get("score", 0.0),
+                "research_gaps": quality_scores.get("novelty", {}).get("score", 0.0)  # Map novelty to research_gaps
+            }
             
             return {
                 "success": True,
-                "overall_quality_score": round(overall_score, 1),
+                "component_scores": component_scores,
                 "quality_breakdown": quality_scores,
                 "scoring_criteria_used": self._get_scoring_criteria(),
                 "strengths": assessment["strengths"],

@@ -260,25 +260,77 @@ class EnhancedScorer:
 
             # 1. DATA AVAILABILITY (25 points) - Most critical
             data_score = 0.0
-            # Check for actual data sharing (not just mention)
-            if any(ind in text_lower for ind in ["data available at", "data deposited", "data can be accessed"]):
-                data_score += 10.0  # Explicit availability statement
-            if any(ind in text_lower for ind in ["github.com/", "osf.io/", "figshare.com/", "zenodo.org/", "dryad.org/"]):
-                data_score += 10.0  # Actual repository link (contains /)
-            if "doi" in text_lower and "data" in text_lower:
-                data_score += 5.0  # DOI for data
+            
+            # Use extracted indicators from reproducibility_data if available (more accurate)
+            if reproducibility_data and reproducibility_data.get("reproducibility_summary"):
+                summary = reproducibility_data["reproducibility_summary"]
+                data_repos = summary.get("data_repositories", [])
+                
+                logger.info(f"📊 Reproducibility scoring - Data repositories found: {len(data_repos)}")
+                
+                if len(data_repos) > 0:
+                    # Multiple repositories = better (up to 25 points)
+                    # Scale based on number of repositories (more = better, but with diminishing returns)
+                    if len(data_repos) >= 5:
+                        data_score = 25.0  # Excellent - many data sources
+                    elif len(data_repos) >= 3:
+                        data_score = 23.0  # Very good - multiple sources
+                    elif len(data_repos) >= 2:
+                        data_score = 20.0  # Good - multiple sources
+                    else:
+                        data_score = 18.0  # Single source
+                elif summary.get("has_open_data", False):
+                    data_score = 15.0  # Has data but no explicit repositories listed
+                else:
+                    # Check if there are DOIs in the text (might be in references)
+                    doi_count = text_lower.count("doi.org/10.")
+                    if doi_count > 0:
+                        # If many DOIs found, give partial credit (they might be data DOIs)
+                        if doi_count >= 10:
+                            data_score = 20.0  # Many DOIs - likely includes data
+                            logger.info(f"📊 Found {doi_count} DOIs in text - giving partial credit for data availability")
+                        elif doi_count >= 5:
+                            data_score = 15.0
+                            logger.info(f"📊 Found {doi_count} DOIs in text - giving partial credit")
+                        else:
+                            data_score = 10.0
+                            logger.info(f"📊 Found {doi_count} DOIs in text - minimal credit")
+            else:
+                # Fallback to keyword matching if no reproducibility_data
+                if any(ind in text_lower for ind in ["data available at", "data deposited", "data can be accessed"]):
+                    data_score += 10.0  # Explicit availability statement
+                if any(ind in text_lower for ind in ["github.com/", "osf.io/", "figshare.com/", "zenodo.org/", "dryad.org/"]):
+                    data_score += 10.0  # Actual repository link (contains /)
+                if "doi" in text_lower and "data" in text_lower:
+                    data_score += 5.0  # DOI for data
 
             components["data_availability"] = min(25.0, data_score)
             score += components["data_availability"]
 
             # 2. CODE AVAILABILITY (20 points)
             code_score = 0.0
-            if any(ind in text_lower for ind in ["code available at", "analysis code", "scripts available"]):
-                code_score += 8.0  # Explicit code availability
-            if any(ind in text_lower for ind in ["github.com/", "gitlab.com/", "bitbucket.org/"]):
-                code_score += 8.0  # Code repository link
-            if any(ind in text_lower for ind in ["jupyter notebook", "r markdown", "analysis pipeline"]):
-                code_score += 4.0  # Documented analysis workflow
+            
+            # Use extracted indicators from reproducibility_data if available
+            if reproducibility_data and reproducibility_data.get("reproducibility_summary"):
+                summary = reproducibility_data["reproducibility_summary"]
+                code_repos = summary.get("code_repositories", [])
+                
+                if len(code_repos) > 0:
+                    # Multiple repositories = better (up to 20 points)
+                    if len(code_repos) >= 2:
+                        code_score = 20.0  # Excellent - multiple code sources
+                    else:
+                        code_score = 18.0  # Single code source
+                elif summary.get("has_code_repository", False):
+                    code_score = 15.0  # Has code but no explicit repositories listed
+            else:
+                # Fallback to keyword matching
+                if any(ind in text_lower for ind in ["code available at", "analysis code", "scripts available"]):
+                    code_score += 8.0  # Explicit code availability
+                if any(ind in text_lower for ind in ["github.com/", "gitlab.com/", "bitbucket.org/"]):
+                    code_score += 8.0  # Code repository link
+                if any(ind in text_lower for ind in ["jupyter notebook", "r markdown", "analysis pipeline"]):
+                    code_score += 4.0  # Documented analysis workflow
 
             components["code_availability"] = min(20.0, code_score)
             score += components["code_availability"]
@@ -331,18 +383,50 @@ class EnhancedScorer:
 
             # 6. PRE-REGISTRATION (10 points)
             prereg_score = 0.0
-            if any(ind in text_lower for ind in ["pre-registered", "preregistered", "pre registered"]):
-                prereg_score += 5.0
-            if any(ind in text_lower for ind in ["clinicaltrials.gov", "osf.io/register", "aspredicted.org", "registered report"]):
-                prereg_score += 5.0  # Specific registration platform
+            
+            # Use extracted indicators from reproducibility_data if available
+            if reproducibility_data and reproducibility_data.get("reproducibility_summary"):
+                summary = reproducibility_data["reproducibility_summary"]
+                prereg_numbers = summary.get("preregistration_numbers", [])
+                
+                if len(prereg_numbers) > 0:
+                    prereg_score = 10.0  # Pre-registration found (full points)
+                elif summary.get("has_preregistration", False):
+                    prereg_score = 8.0  # Mentioned but no explicit number
+            else:
+                # Fallback to keyword matching
+                if any(ind in text_lower for ind in ["pre-registered", "preregistered", "pre registered"]):
+                    prereg_score += 5.0
+                if any(ind in text_lower for ind in ["clinicaltrials.gov", "osf.io/register", "aspredicted.org", "registered report"]):
+                    prereg_score += 5.0  # Specific registration platform
 
             components["preregistration"] = min(10.0, prereg_score)
             score += components["preregistration"]
 
             # 7. DOCUMENTATION QUALITY (5 points)
             doc_score = 0.0
-            if any(ind in text_lower for ind in ["supplementary material", "supplementary information", "supplementary file"]):
-                doc_score += 2.0
+            
+            # Use extracted indicators from reproducibility_data if available
+            if reproducibility_data and reproducibility_data.get("reproducibility_summary"):
+                summary = reproducibility_data["reproducibility_summary"]
+                supp_links = summary.get("supplementary_material_links", [])
+                
+                if len(supp_links) > 0:
+                    # Multiple supplementary materials = better
+                    if len(supp_links) >= 2:
+                        doc_score = 5.0  # Excellent documentation
+                    else:
+                        doc_score = 3.0  # Some supplementary materials
+                else:
+                    # Fallback to keyword matching
+                    if any(ind in text_lower for ind in ["supplementary material", "supplementary information", "supplementary file"]):
+                        doc_score += 2.0
+            else:
+                # Fallback to keyword matching
+                if any(ind in text_lower for ind in ["supplementary material", "supplementary information", "supplementary file"]):
+                    doc_score += 2.0
+            
+            # Additional documentation indicators (always check)
             if any(ind in text_lower for ind in ["readme", "documentation", "user guide"]):
                 doc_score += 2.0
             if any(ind in text_lower for ind in ["tutorial", "walkthrough", "example"]):

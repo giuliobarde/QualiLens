@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useEffect, useState, useRef } from 'react';
-import { extractComponentScores, calculateOverallScore, RubricWeights } from '@/utils/weight-calculator';
+import { extractComponentScores, calculateOverallScore, RubricWeights, ComponentScores } from '@/utils/weight-calculator';
 import RubricConfig, { RubricWeights as RubricWeightsType } from '@/components/RubricConfig';
 
 interface CircularScoreDisplayProps {
@@ -21,6 +21,14 @@ interface ScoreBreakdown {
   source: string;
 }
 
+// Default weights matching RubricConfig
+const DEFAULT_WEIGHTS: RubricWeights = {
+  methodology: 0.60,
+  bias: 0.20,
+  reproducibility: 0.10,
+  research_gaps: 0.10,
+};
+
 export default function CircularScoreDisplay({ 
   data, 
   className = '', 
@@ -33,71 +41,53 @@ export default function CircularScoreDisplay({
   const hasAnimatedRef = useRef(false);
   const lastAnimatedScoreRef = useRef<number | null>(null);
   const [isEditingWeights, setIsEditingWeights] = useState(false);
-  const [currentWeights, setCurrentWeights] = useState<RubricWeights | null>(customWeights || null);
+  const [activeTab, setActiveTab] = useState<'overall' | 'breakdown'>('overall');
+  // Initialize with customWeights if provided, otherwise use default weights (not null)
+  const [currentWeights, setCurrentWeights] = useState<RubricWeights>(customWeights || DEFAULT_WEIGHTS);
 
-  // Comprehensive score calculation
+  // Comprehensive score calculation - now always uses component_scores from backend
   const calculateComprehensiveScore = (): ScoreBreakdown => {
-    // Method 1: Direct overall_quality_score from backend
-    if (data?.overall_quality_score !== undefined && data?.overall_quality_score !== null) {
-      const directScore = Number(data.overall_quality_score);
-      
-      // Check if this is a suspiciously low score (likely from quality assessor override)
-      if (directScore < 50 && data?.quantitative_scores?.scores?.overall_score > directScore) {
-        const methodologyScore = data.quantitative_scores.scores.overall_score;
-        return {
-          methodology: methodologyScore,
-          reproducibility: methodologyScore,
-          bias: methodologyScore,
-          statistics: methodologyScore,
-          overall: methodologyScore,
-          source: 'methodology_override'
-        };
-      }
-      
+    // Primary method: Extract component scores and calculate overall using weights
+    const componentScores = extractComponentScores(data);
+    if (componentScores) {
+      // Calculate overall score using current weights (default or custom)
+      const overall = calculateOverallScore(componentScores, currentWeights);
       return {
-        methodology: directScore,
-        reproducibility: directScore,
-        bias: directScore,
-        statistics: directScore,
-        overall: directScore,
-        source: 'direct_backend_score'
+        methodology: componentScores.methodology,
+        reproducibility: componentScores.reproducibility,
+        bias: componentScores.bias,
+        statistics: componentScores.methodology, // Use methodology for statistics display
+        overall,
+        source: 'component_scores'
       };
     }
     
-    // Method 2: Check quality_breakdown from quality assessor
+    // Fallback: Try to extract from quality_breakdown (legacy support)
     if (data?.quality_breakdown) {
       const breakdown = data.quality_breakdown;
       const methodology = breakdown.methodology?.score || 0;
       const reproducibility = breakdown.reproducibility?.score || 0;
       const bias = breakdown.bias?.score || 0;
-      const statistics = breakdown.statistics?.score || 0;
+      const research_gaps = breakdown.research_gaps?.score || 0;
       
-      const overall = (methodology + reproducibility + bias + statistics) / 4;
+      const fallbackScores: ComponentScores = {
+        methodology,
+        reproducibility,
+        bias,
+        research_gaps
+      };
+      const overall = calculateOverallScore(fallbackScores, currentWeights);
       return {
         methodology,
         reproducibility,
         bias,
-        statistics,
+        statistics: methodology, // Use methodology for statistics display
         overall,
         source: 'quality_breakdown'
       };
     }
     
-    // Method 3: Check quantitative_scores from methodology analyzer
-    if (data?.quantitative_scores?.scores) {
-      const scores = data.quantitative_scores.scores;
-      const overall = scores.overall_score || 0;
-      return {
-        methodology: scores.study_design || 0,
-        reproducibility: scores.data_collection || 0,
-        bias: scores.validity_measures || 0,
-        statistics: scores.analysis_methods || 0,
-        overall,
-        source: 'quantitative_scores'
-      };
-    }
-    
-    // Method 4: Calculate from individual metrics
+    // Last resort: Calculate from individual metrics (should rarely be needed)
     let totalScore = 0;
     let count = 0;
     const scores: any = {};
@@ -111,7 +101,9 @@ export default function CircularScoreDisplay({
     }
     
     if (data?.reproducibility_score !== undefined) {
-      const reproScore = data.reproducibility_score * 100;
+      const reproScore = typeof data.reproducibility_score === 'number' 
+        ? (data.reproducibility_score <= 1.0 ? data.reproducibility_score * 100 : data.reproducibility_score)
+        : 0;
       scores.reproducibility = reproScore;
       totalScore += reproScore;
       count++;
@@ -124,39 +116,62 @@ export default function CircularScoreDisplay({
       count++;
     }
     
-    if (data?.statistical_concerns && Array.isArray(data.statistical_concerns)) {
-      const statsScore = Math.max(0, 100 - (data.statistical_concerns.length * 15));
-      scores.statistics = statsScore;
-      totalScore += statsScore;
+    // Research gaps fallback
+    if (data?.research_gaps && Array.isArray(data.research_gaps)) {
+      const gapsCount = data.research_gaps.length;
+      let researchGapsScore = 0.0;
+      if (gapsCount === 0) {
+        researchGapsScore = 0.0;
+      } else if (gapsCount <= 2) {
+        researchGapsScore = 40.0;
+      } else if (gapsCount <= 5) {
+        researchGapsScore = 70.0;
+      } else if (gapsCount <= 10) {
+        researchGapsScore = 90.0;
+      } else {
+        researchGapsScore = 100.0;
+      }
+      scores.research_gaps = researchGapsScore;
+      totalScore += researchGapsScore;
       count++;
     }
     
-    const overall = count > 0 ? totalScore / count : 50;
+    // If we have component scores, calculate weighted overall
+    if (count > 0 && (scores.methodology !== undefined || scores.reproducibility !== undefined || 
+        scores.bias !== undefined || scores.research_gaps !== undefined)) {
+      const fallbackComponentScores: ComponentScores = {
+        methodology: scores.methodology || 0,
+        reproducibility: scores.reproducibility || 0,
+        bias: scores.bias || 0,
+        research_gaps: scores.research_gaps || 0
+      };
+      const overall = calculateOverallScore(fallbackComponentScores, currentWeights);
+      return {
+        methodology: scores.methodology || overall,
+        reproducibility: scores.reproducibility || overall,
+        bias: scores.bias || overall,
+        statistics: scores.methodology || overall,
+        overall,
+        source: 'individual_metrics'
+      };
+    }
     
+    // Absolute fallback: return zeros
     return {
-      methodology: scores.methodology || overall,
-      reproducibility: scores.reproducibility || overall,
-      bias: scores.bias || overall,
-      statistics: scores.statistics || overall,
-      overall,
-      source: 'individual_metrics'
+      methodology: 0,
+      reproducibility: 0,
+      bias: 0,
+      statistics: 0,
+      overall: 0,
+      source: 'fallback'
     };
   };
 
   // Calculate score when data changes
   useEffect(() => {
     if (data) {
+      // calculateComprehensiveScore now always calculates overall using currentWeights
       const breakdown = calculateComprehensiveScore();
-      
-      // If we have custom weights, recalculate the overall score
-      if (currentWeights) {
-        const componentScores = extractComponentScores(data);
-        if (componentScores) {
-          const recalculatedOverall = calculateOverallScore(componentScores, currentWeights);
-          breakdown.overall = recalculatedOverall;
-        }
-      }
-      
       setScoreBreakdown(breakdown);
       
       // Check if this is new data (different score) or just a re-render (same score)
@@ -197,24 +212,26 @@ export default function CircularScoreDisplay({
   useEffect(() => {
     if (customWeights) {
       setCurrentWeights(customWeights);
+    } else {
+      // If customWeights is cleared, reset to defaults
+      setCurrentWeights(DEFAULT_WEIGHTS);
     }
   }, [customWeights]);
 
-  // Recalculate overall score when weights change
+  // Recalculate overall score when weights change (but scoreBreakdown already exists)
+  // This handles the case where weights change after initial calculation
   useEffect(() => {
-    if (currentWeights && scoreBreakdown) {
-      const componentScores = extractComponentScores(data);
-      if (componentScores) {
-        const newOverall = calculateOverallScore(componentScores, currentWeights);
-        setAnimatedScore(newOverall);
-        if (scoreBreakdown) {
-          setScoreBreakdown({
-            ...scoreBreakdown,
-            overall: newOverall,
-          });
-        }
+    if (scoreBreakdown && data) {
+      // Recalculate using the comprehensive score function which uses currentWeights
+      const newBreakdown = calculateComprehensiveScore();
+      // Only update if the score actually changed (avoid unnecessary updates)
+      if (Math.abs(newBreakdown.overall - scoreBreakdown.overall) > 0.01) {
+        setAnimatedScore(newBreakdown.overall);
+        setScoreBreakdown(newBreakdown);
       }
     }
+    // Note: We intentionally don't include scoreBreakdown in deps to avoid infinite loops
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [currentWeights, data]);
 
   const score = scoreBreakdown?.overall || 0;
@@ -232,9 +249,11 @@ export default function CircularScoreDisplay({
 
   const handleWeightsEditCancel = () => {
     setIsEditingWeights(false);
-    // Reset to original weights if available
+    // Reset to original weights if available, otherwise use defaults
     if (customWeights) {
       setCurrentWeights(customWeights);
+    } else {
+      setCurrentWeights(DEFAULT_WEIGHTS);
     }
   };
   
@@ -294,155 +313,187 @@ export default function CircularScoreDisplay({
           )}
         </div>
 
-        <div className="grid grid-cols-1 lg:grid-cols-5 gap-6 items-start">
-          {/* Main Score - Left Side */}
-          <div className="lg:col-span-2 flex flex-col items-center">
-            <div className="relative w-40 h-40 mx-auto mb-4">
-              <svg className="transform -rotate-90 w-40 h-40">
-                <circle
-                  cx="80"
-                  cy="80"
-                  r={radius * 0.8}
-                  stroke="#E5E7EB"
-                  strokeWidth="10"
-                  fill="none"
-                />
-                <circle
-                  cx="80"
-                  cy="80"
-                  r={radius * 0.8}
-                  stroke={getScoreColor(normalizedScore)}
-                  strokeWidth="10"
-                  fill="none"
-                  strokeLinecap="round"
-                  strokeDasharray={circumference * 0.8}
-                  strokeDashoffset={offset * 0.8}
-                  className="transition-all duration-1000 ease-out"
-                />
-              </svg>
-              <div className="absolute inset-0 flex flex-col items-center justify-center">
-                <div className="text-4xl font-bold" style={{ color: getScoreColor(normalizedScore) }}>
-                  {Math.round(normalizedScore)}
+        {/* Tabs */}
+        <div className="flex space-x-0.5 mb-4 bg-gray-100 p-0.5 rounded-md">
+          <button
+            onClick={() => setActiveTab('overall')}
+            className={`flex-1 px-2 py-1 rounded text-xs font-medium transition-all ${
+              activeTab === 'overall'
+                ? 'bg-white text-blue-600 shadow-sm'
+                : 'text-gray-600 hover:text-gray-900'
+            }`}
+          >
+            Overall Score
+          </button>
+          <button
+            onClick={() => setActiveTab('breakdown')}
+            className={`flex-1 px-2 py-1 rounded text-xs font-medium transition-all ${
+              activeTab === 'breakdown'
+                ? 'bg-white text-blue-600 shadow-sm'
+                : 'text-gray-600 hover:text-gray-900'
+            }`}
+          >
+            Score Breakdown
+          </button>
+        </div>
+
+        {/* Tab Content */}
+        {activeTab === 'overall' ? (
+          <div className="grid grid-cols-1 lg:grid-cols-5 gap-6 items-start">
+            {/* Main Score - Left Side */}
+            <div className="lg:col-span-2 flex flex-col items-center">
+              <div className="relative w-40 h-40 mx-auto mb-4">
+                <svg className="transform -rotate-90 w-40 h-40">
+                  <circle
+                    cx="80"
+                    cy="80"
+                    r={radius * 0.8}
+                    stroke="#E5E7EB"
+                    strokeWidth="10"
+                    fill="none"
+                  />
+                  <circle
+                    cx="80"
+                    cy="80"
+                    r={radius * 0.8}
+                    stroke={getScoreColor(normalizedScore)}
+                    strokeWidth="10"
+                    fill="none"
+                    strokeLinecap="round"
+                    strokeDasharray={circumference * 0.8}
+                    strokeDashoffset={offset * 0.8}
+                    className="transition-all duration-1000 ease-out"
+                  />
+                </svg>
+                <div className="absolute inset-0 flex flex-col items-center justify-center">
+                  <div className="text-4xl font-bold" style={{ color: getScoreColor(normalizedScore) }}>
+                    {Math.round(normalizedScore)}
+                  </div>
+                  <div className="text-xs text-gray-500 mt-1">out of 100</div>
                 </div>
-                <div className="text-xs text-gray-500 mt-1">out of 100</div>
+              </div>
+              <div className={`text-lg font-bold mb-2`} style={{ color: getScoreColor(normalizedScore) }}>
+                {getScoreLabel(normalizedScore)}
+              </div>
+              <div className="text-sm text-gray-600 text-center max-w-xs">
+                {getScoreDescription(normalizedScore)}
               </div>
             </div>
-            <div className={`text-lg font-bold mb-2`} style={{ color: getScoreColor(normalizedScore) }}>
-              {getScoreLabel(normalizedScore)}
-            </div>
-            <div className="text-sm text-gray-600 text-center max-w-xs">
-              {getScoreDescription(normalizedScore)}
-            </div>
-          </div>
 
-          {/* Right Side - Weight Editing or Score Breakdown */}
-          {isEditingWeights ? (
-            <div className="lg:col-span-3">
-              <RubricConfig
-                initialWeights={currentWeights || undefined}
-                onWeightsChange={handleWeightsChange}
-                alwaysExpanded={true}
-              />
-            </div>
-          ) : scoreBreakdown && scoreBreakdown.source !== 'direct_backend_score' ? (
-            <div className="lg:col-span-3">
-              <div className="text-sm font-semibold text-gray-700 mb-4">Score Breakdown</div>
+            {/* Right Side - Weight Editing or Additional Metrics */}
+            {isEditingWeights ? (
+              <div className="lg:col-span-3">
+                <RubricConfig
+                  initialWeights={currentWeights || undefined}
+                  onWeightsChange={handleWeightsChange}
+                  alwaysExpanded={true}
+                />
+              </div>
+            ) : (
+              <div className="lg:col-span-3">
+                <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+                  {data?.tools_used && (
+                    <div className="bg-blue-50 p-3 rounded-xl border border-blue-200 text-center">
+                      <div className="font-bold text-blue-800 text-2xl">{data.tools_used.length}</div>
+                      <div className="text-blue-600 text-xs mt-0.5">Tools Used</div>
+                    </div>
+                  )}
+                  
+                  {data?.reproducibility_score !== undefined && (
+                    <div className="bg-green-50 p-3 rounded-xl border border-green-200 text-center">
+                      <div className="font-bold text-green-800 text-2xl">
+                        {Math.round(data.reproducibility_score <= 1.0 ? data.reproducibility_score * 100 : data.reproducibility_score)}%
+                      </div>
+                      <div className="text-green-600 text-xs mt-0.5">Reproducible</div>
+                    </div>
+                  )}
+                  
+                  {data?.detected_biases && (
+                    <div className="bg-red-50 p-3 rounded-xl border border-red-200 text-center">
+                      <div className="font-bold text-red-800 text-2xl">{data.detected_biases.length}</div>
+                      <div className="text-red-600 text-xs mt-0.5">Biases Found</div>
+                    </div>
+                  )}
+                  
+                  {data?.research_gaps && (
+                    <div className="bg-yellow-50 p-3 rounded-xl border border-yellow-200 text-center">
+                      <div className="font-bold text-yellow-800 text-2xl">{data.research_gaps.length}</div>
+                      <div className="text-yellow-600 text-xs mt-0.5">Research Gaps</div>
+                    </div>
+                  )}
+                </div>
+              </div>
+            )}
+          </div>
+        ) : (
+          /* Score Breakdown Tab */
+          scoreBreakdown && (
+            <div className="space-y-4">
+              <div className="text-sm font-semibold text-gray-700 mb-4">Component Scores</div>
               <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-                <div className="bg-gradient-to-br from-blue-50 to-blue-100 p-4 rounded-xl border border-blue-200 text-center">
+                <div className="bg-gradient-to-br from-blue-50 to-blue-100 p-4 rounded-xl border border-blue-200">
                   <div className="text-gray-600 mb-2 text-sm font-medium">Methodology</div>
-                  <div className="text-3xl font-bold" style={{ color: getScoreColor(scoreBreakdown.methodology) }}>
+                  <div className="text-3xl font-bold mb-2" style={{ color: getScoreColor(scoreBreakdown.methodology) }}>
                     {Math.round(scoreBreakdown.methodology)}
                   </div>
+                  <div className="text-xs text-gray-500">
+                    Weight: {(currentWeights.methodology * 100).toFixed(0)}%
+                  </div>
+                  <div className="text-xs text-gray-500 mt-1">
+                    Contribution: {(scoreBreakdown.methodology * currentWeights.methodology).toFixed(1)} pts
+                  </div>
                 </div>
-                <div className="bg-gradient-to-br from-green-50 to-green-100 p-4 rounded-xl border border-green-200 text-center">
+                
+                <div className="bg-gradient-to-br from-green-50 to-green-100 p-4 rounded-xl border border-green-200">
                   <div className="text-gray-600 mb-2 text-sm font-medium">Reproducibility</div>
-                  <div className="text-3xl font-bold" style={{ color: getScoreColor(scoreBreakdown.reproducibility) }}>
+                  <div className="text-3xl font-bold mb-2" style={{ color: getScoreColor(scoreBreakdown.reproducibility) }}>
                     {Math.round(scoreBreakdown.reproducibility)}
                   </div>
+                  <div className="text-xs text-gray-500">
+                    Weight: {(currentWeights.reproducibility * 100).toFixed(0)}%
+                  </div>
+                  <div className="text-xs text-gray-500 mt-1">
+                    Contribution: {(scoreBreakdown.reproducibility * currentWeights.reproducibility).toFixed(1)} pts
+                  </div>
                 </div>
-                <div className="bg-gradient-to-br from-red-50 to-red-100 p-4 rounded-xl border border-red-200 text-center">
+                
+                <div className="bg-gradient-to-br from-red-50 to-red-100 p-4 rounded-xl border border-red-200">
                   <div className="text-gray-600 mb-2 text-sm font-medium">Bias</div>
-                  <div className="text-3xl font-bold" style={{ color: getScoreColor(scoreBreakdown.bias) }}>
+                  <div className="text-3xl font-bold mb-2" style={{ color: getScoreColor(scoreBreakdown.bias) }}>
                     {Math.round(scoreBreakdown.bias)}
                   </div>
-                </div>
-                <div className="bg-gradient-to-br from-purple-50 to-purple-100 p-4 rounded-xl border border-purple-200 text-center">
-                  <div className="text-gray-600 mb-2 text-sm font-medium">Statistics</div>
-                  <div className="text-3xl font-bold" style={{ color: getScoreColor(scoreBreakdown.statistics) }}>
-                    {Math.round(scoreBreakdown.statistics)}
+                  <div className="text-xs text-gray-500">
+                    Weight: {(currentWeights.bias * 100).toFixed(0)}%
+                  </div>
+                  <div className="text-xs text-gray-500 mt-1">
+                    Contribution: {(scoreBreakdown.bias * currentWeights.bias).toFixed(1)} pts
                   </div>
                 </div>
-              </div>
-              
-              {/* Additional metrics - Below breakdown */}
-              <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mt-4">
-                {data?.tools_used && (
-                  <div className="bg-blue-50 p-3 rounded-xl border border-blue-200 text-center">
-                    <div className="font-bold text-blue-800 text-2xl">{data.tools_used.length}</div>
-                    <div className="text-blue-600 text-sm">Tools Used</div>
-                  </div>
-                )}
                 
-                {data?.reproducibility_score !== undefined && (
-                  <div className="bg-green-50 p-3 rounded-xl border border-green-200 text-center">
-                    <div className="font-bold text-green-800 text-2xl">
-                      {Math.round(data.reproducibility_score * 100)}%
-                    </div>
-                    <div className="text-green-600 text-sm">Reproducible</div>
-                  </div>
-                )}
-                
-                {data?.detected_biases && (
-                  <div className="bg-red-50 p-3 rounded-xl border border-red-200 text-center">
-                    <div className="font-bold text-red-800 text-2xl">{data.detected_biases.length}</div>
-                    <div className="text-red-600 text-sm">Biases Found</div>
-                  </div>
-                )}
-                
-                {data?.research_gaps && (
-                  <div className="bg-yellow-50 p-3 rounded-xl border border-yellow-200 text-center">
-                    <div className="font-bold text-yellow-800 text-2xl">{data.research_gaps.length}</div>
-                    <div className="text-yellow-600 text-sm">Research Gaps</div>
-                  </div>
-                )}
+                <div className="bg-gradient-to-br from-purple-50 to-purple-100 p-4 rounded-xl border border-purple-200">
+                  <div className="text-gray-600 mb-2 text-sm font-medium">Research Gaps</div>
+                  {(() => {
+                    const componentScores = extractComponentScores(data);
+                    const researchGapsScore = componentScores?.research_gaps || 0;
+                    return (
+                      <>
+                        <div className="text-3xl font-bold mb-2" style={{ color: getScoreColor(researchGapsScore) }}>
+                          {Math.round(researchGapsScore)}
+                        </div>
+                        <div className="text-xs text-gray-500">
+                          Weight: {(currentWeights.research_gaps * 100).toFixed(0)}%
+                        </div>
+                        <div className="text-xs text-gray-500 mt-1">
+                          Contribution: {(researchGapsScore * currentWeights.research_gaps).toFixed(1)} pts
+                        </div>
+                      </>
+                    );
+                  })()}
+                </div>
               </div>
             </div>
-          ) : (
-            <div className="lg:col-span-3">
-              <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-                {data?.tools_used && (
-                  <div className="bg-blue-50 p-4 rounded-xl border border-blue-200 text-center">
-                    <div className="font-bold text-blue-800 text-3xl">{data.tools_used.length}</div>
-                    <div className="text-blue-600 text-sm mt-1">Tools Used</div>
-                  </div>
-                )}
-                
-                {data?.reproducibility_score !== undefined && (
-                  <div className="bg-green-50 p-4 rounded-xl border border-green-200 text-center">
-                    <div className="font-bold text-green-800 text-3xl">
-                      {Math.round(data.reproducibility_score * 100)}%
-                    </div>
-                    <div className="text-green-600 text-sm mt-1">Reproducible</div>
-                  </div>
-                )}
-                
-                {data?.detected_biases && (
-                  <div className="bg-red-50 p-4 rounded-xl border border-red-200 text-center">
-                    <div className="font-bold text-red-800 text-3xl">{data.detected_biases.length}</div>
-                    <div className="text-red-600 text-sm mt-1">Biases Found</div>
-                  </div>
-                )}
-                
-                {data?.research_gaps && (
-                  <div className="bg-yellow-50 p-4 rounded-xl border border-yellow-200 text-center">
-                    <div className="font-bold text-yellow-800 text-3xl">{data.research_gaps.length}</div>
-                    <div className="text-yellow-600 text-sm mt-1">Research Gaps</div>
-                  </div>
-                )}
-              </div>
-            </div>
-          )}
-        </div>
+          )
+        )}
       </div>
     );
   }
@@ -482,117 +533,181 @@ export default function CircularScoreDisplay({
               </svg>
             </button>
           </div>
-      
-          {/* Circular Progress */}
-      <div className="relative w-48 h-48 mx-auto mb-6">
-        <svg className="transform -rotate-90 w-48 h-48">
-          {/* Background circle */}
-          <circle
-            cx="96"
-            cy="96"
-            r={radius}
-            stroke="#E5E7EB"
-            strokeWidth="12"
-            fill="none"
-          />
-          {/* Progress circle */}
-          <circle
-            cx="96"
-            cy="96"
-            r={radius}
-            stroke={getScoreColor(normalizedScore)}
-            strokeWidth="12"
-            fill="none"
-            strokeLinecap="round"
-            strokeDasharray={circumference}
-            strokeDashoffset={offset}
-            className="transition-all duration-1000 ease-out"
-          />
-        </svg>
-        {/* Score text in center */}
-        <div className="absolute inset-0 flex flex-col items-center justify-center">
-          <div className="text-5xl font-bold" style={{ color: getScoreColor(normalizedScore) }}>
-            {Math.round(normalizedScore)}
+
+          {/* Tabs */}
+          <div className="flex space-x-0.5 mb-4 bg-gray-100 p-0.5 rounded-md">
+            <button
+              onClick={() => setActiveTab('overall')}
+              className={`flex-1 px-2 py-1 rounded text-xs font-medium transition-all ${
+                activeTab === 'overall'
+                  ? 'bg-white text-blue-600 shadow-sm'
+                  : 'text-gray-600 hover:text-gray-900'
+              }`}
+            >
+              Overall Score
+            </button>
+            <button
+              onClick={() => setActiveTab('breakdown')}
+              className={`flex-1 px-2 py-1 rounded text-xs font-medium transition-all ${
+                activeTab === 'breakdown'
+                  ? 'bg-white text-blue-600 shadow-sm'
+                  : 'text-gray-600 hover:text-gray-900'
+              }`}
+            >
+              Score Breakdown
+            </button>
           </div>
-          <div className="text-xs text-gray-500 mt-1">out of 100</div>
-        </div>
-      </div>
-      
-      {/* Score details */}
-      <div className="space-y-3 mb-6">
-        <div className={`text-xl font-bold`} style={{ color: getScoreColor(normalizedScore) }}>
-          {getScoreLabel(normalizedScore)}
-        </div>
-        <div className="text-sm text-gray-600 max-w-xs mx-auto">
-          {getScoreDescription(normalizedScore)}
-        </div>
-      </div>
-      
-      {/* Score Breakdown */}
-      {scoreBreakdown && scoreBreakdown.source !== 'direct_backend_score' && (
-        <div className="mt-6 p-4 bg-gradient-to-br from-gray-50 to-gray-100 rounded-2xl border border-gray-200">
-          <div className="text-sm font-semibold text-gray-700 mb-3">Score Breakdown</div>
-          <div className="grid grid-cols-2 gap-3 text-xs">
-            <div className="bg-white p-2 rounded-lg">
-              <div className="text-gray-600 mb-1">Methodology</div>
-              <div className="text-lg font-bold" style={{ color: getScoreColor(scoreBreakdown.methodology) }}>
-                {Math.round(scoreBreakdown.methodology)}
-              </div>
-            </div>
-            <div className="bg-white p-2 rounded-lg">
-              <div className="text-gray-600 mb-1">Reproducibility</div>
-              <div className="text-lg font-bold" style={{ color: getScoreColor(scoreBreakdown.reproducibility) }}>
-                {Math.round(scoreBreakdown.reproducibility)}
-              </div>
-            </div>
-            <div className="bg-white p-2 rounded-lg">
-              <div className="text-gray-600 mb-1">Bias</div>
-              <div className="text-lg font-bold" style={{ color: getScoreColor(scoreBreakdown.bias) }}>
-                {Math.round(scoreBreakdown.bias)}
-              </div>
-            </div>
-            <div className="bg-white p-2 rounded-lg">
-              <div className="text-gray-600 mb-1">Statistics</div>
-              <div className="text-lg font-bold" style={{ color: getScoreColor(scoreBreakdown.statistics) }}>
-                {Math.round(scoreBreakdown.statistics)}
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
-      
-          {/* Additional metrics */}
-          <div className="mt-6 grid grid-cols-2 gap-3 text-xs">
-            {data?.tools_used && (
-              <div className="bg-blue-50 p-3 rounded-xl border border-blue-200">
-                <div className="font-bold text-blue-800 text-lg">{data.tools_used.length}</div>
-                <div className="text-blue-600">Tools Used</div>
-              </div>
-            )}
-            
-            {data?.reproducibility_score !== undefined && (
-              <div className="bg-green-50 p-3 rounded-xl border border-green-200">
-                <div className="font-bold text-green-800 text-lg">
-                  {Math.round(data.reproducibility_score * 100)}%
+
+          {/* Tab Content */}
+          {activeTab === 'overall' ? (
+            <>
+              {/* Circular Progress */}
+              <div className="relative w-48 h-48 mx-auto mb-6">
+                <svg className="transform -rotate-90 w-48 h-48">
+                  {/* Background circle */}
+                  <circle
+                    cx="96"
+                    cy="96"
+                    r={radius}
+                    stroke="#E5E7EB"
+                    strokeWidth="12"
+                    fill="none"
+                  />
+                  {/* Progress circle */}
+                  <circle
+                    cx="96"
+                    cy="96"
+                    r={radius}
+                    stroke={getScoreColor(normalizedScore)}
+                    strokeWidth="12"
+                    fill="none"
+                    strokeLinecap="round"
+                    strokeDasharray={circumference}
+                    strokeDashoffset={offset}
+                    className="transition-all duration-1000 ease-out"
+                  />
+                </svg>
+                {/* Score text in center */}
+                <div className="absolute inset-0 flex flex-col items-center justify-center">
+                  <div className="text-5xl font-bold" style={{ color: getScoreColor(normalizedScore) }}>
+                    {Math.round(normalizedScore)}
+                  </div>
+                  <div className="text-xs text-gray-500 mt-1">out of 100</div>
                 </div>
-                <div className="text-green-600">Reproducible</div>
               </div>
-            )}
-            
-            {data?.detected_biases && (
-              <div className="bg-red-50 p-3 rounded-xl border border-red-200">
-                <div className="font-bold text-red-800 text-lg">{data.detected_biases.length}</div>
-                <div className="text-red-600">Biases Found</div>
+              
+              {/* Score details */}
+              <div className="space-y-3 mb-6">
+                <div className={`text-xl font-bold`} style={{ color: getScoreColor(normalizedScore) }}>
+                  {getScoreLabel(normalizedScore)}
+                </div>
+                <div className="text-sm text-gray-600 max-w-xs mx-auto">
+                  {getScoreDescription(normalizedScore)}
+                </div>
               </div>
-            )}
-            
-            {data?.research_gaps && (
-              <div className="bg-yellow-50 p-3 rounded-xl border border-yellow-200">
-                <div className="font-bold text-yellow-800 text-lg">{data.research_gaps.length}</div>
-                <div className="text-yellow-600">Research Gaps</div>
+              
+              {/* Additional metrics */}
+              <div className="mt-6 grid grid-cols-2 gap-3 text-xs">
+                {data?.tools_used && (
+                  <div className="bg-blue-50 p-2 rounded-xl border border-blue-200">
+                    <div className="font-bold text-blue-800 text-base">{data.tools_used.length}</div>
+                    <div className="text-blue-600">Tools Used</div>
+                  </div>
+                )}
+                
+                {data?.reproducibility_score !== undefined && (
+                  <div className="bg-green-50 p-2 rounded-xl border border-green-200">
+                    <div className="font-bold text-green-800 text-base">
+                      {Math.round(data.reproducibility_score <= 1.0 ? data.reproducibility_score * 100 : data.reproducibility_score)}%
+                    </div>
+                    <div className="text-green-600">Reproducible</div>
+                  </div>
+                )}
+                
+                {data?.detected_biases && (
+                  <div className="bg-red-50 p-2 rounded-xl border border-red-200">
+                    <div className="font-bold text-red-800 text-base">{data.detected_biases.length}</div>
+                    <div className="text-red-600">Biases Found</div>
+                  </div>
+                )}
+                
+                {data?.research_gaps && (
+                  <div className="bg-yellow-50 p-2 rounded-xl border border-yellow-200">
+                    <div className="font-bold text-yellow-800 text-base">{data.research_gaps.length}</div>
+                    <div className="text-yellow-600">Research Gaps</div>
+                  </div>
+                )}
               </div>
-            )}
-          </div>
+            </>
+          ) : (
+            /* Score Breakdown Tab */
+            scoreBreakdown && (
+              <div className="space-y-4">
+                <div className="text-sm font-semibold text-gray-700 mb-4">Component Scores</div>
+                <div className="grid grid-cols-2 gap-4">
+                  <div className="bg-gradient-to-br from-blue-50 to-blue-100 p-4 rounded-xl border border-blue-200">
+                    <div className="text-gray-600 mb-2 text-sm font-medium">Methodology</div>
+                    <div className="text-3xl font-bold mb-2" style={{ color: getScoreColor(scoreBreakdown.methodology) }}>
+                      {Math.round(scoreBreakdown.methodology)}
+                    </div>
+                    <div className="text-xs text-gray-500">
+                      Weight: {(currentWeights.methodology * 100).toFixed(0)}%
+                    </div>
+                    <div className="text-xs text-gray-500 mt-1">
+                      Contribution: {(scoreBreakdown.methodology * currentWeights.methodology).toFixed(1)} pts
+                    </div>
+                  </div>
+                  
+                  <div className="bg-gradient-to-br from-green-50 to-green-100 p-4 rounded-xl border border-green-200">
+                    <div className="text-gray-600 mb-2 text-sm font-medium">Reproducibility</div>
+                    <div className="text-3xl font-bold mb-2" style={{ color: getScoreColor(scoreBreakdown.reproducibility) }}>
+                      {Math.round(scoreBreakdown.reproducibility)}
+                    </div>
+                    <div className="text-xs text-gray-500">
+                      Weight: {(currentWeights.reproducibility * 100).toFixed(0)}%
+                    </div>
+                    <div className="text-xs text-gray-500 mt-1">
+                      Contribution: {(scoreBreakdown.reproducibility * currentWeights.reproducibility).toFixed(1)} pts
+                    </div>
+                  </div>
+                  
+                  <div className="bg-gradient-to-br from-red-50 to-red-100 p-4 rounded-xl border border-red-200">
+                    <div className="text-gray-600 mb-2 text-sm font-medium">Bias</div>
+                    <div className="text-3xl font-bold mb-2" style={{ color: getScoreColor(scoreBreakdown.bias) }}>
+                      {Math.round(scoreBreakdown.bias)}
+                    </div>
+                    <div className="text-xs text-gray-500">
+                      Weight: {(currentWeights.bias * 100).toFixed(0)}%
+                    </div>
+                    <div className="text-xs text-gray-500 mt-1">
+                      Contribution: {(scoreBreakdown.bias * currentWeights.bias).toFixed(1)} pts
+                    </div>
+                  </div>
+                  
+                  <div className="bg-gradient-to-br from-purple-50 to-purple-100 p-4 rounded-xl border border-purple-200">
+                    <div className="text-gray-600 mb-2 text-sm font-medium">Research Gaps</div>
+                    {(() => {
+                      const componentScores = extractComponentScores(data);
+                      const researchGapsScore = componentScores?.research_gaps || 0;
+                      return (
+                        <>
+                          <div className="text-3xl font-bold mb-2" style={{ color: getScoreColor(researchGapsScore) }}>
+                            {Math.round(researchGapsScore)}
+                          </div>
+                          <div className="text-xs text-gray-500">
+                            Weight: {(currentWeights.research_gaps * 100).toFixed(0)}%
+                          </div>
+                          <div className="text-xs text-gray-500 mt-1">
+                            Contribution: {(researchGapsScore * currentWeights.research_gaps).toFixed(1)} pts
+                          </div>
+                        </>
+                      );
+                    })()}
+                  </div>
+                </div>
+              </div>
+            )
+          )}
         </>
       )}
     </div>
