@@ -228,12 +228,22 @@ export class AgentService extends BaseHttpClient {
     try {
       const response = await fetch(`${API_BASE_URL}/api/agent/progress?request_id=${requestId}`);
       if (!response.ok) {
+        // 404 means progress not found yet (request might not have started)
+        // Return null instead of throwing to allow polling to continue
+        if (response.status === 404) {
+          console.log(`Progress not found for request_id: ${requestId} (request may not have started yet)`);
+          return null;
+        }
         throw new Error(`HTTP error! status: ${response.status}`);
       }
       return await response.json();
     } catch (error) {
-      console.error('Get progress API error:', error);
-      throw error;
+      // Only log non-404 errors
+      if (error instanceof Error && !error.message.includes('404')) {
+        console.error('Get progress API error:', error);
+      }
+      // Return null for any error to allow polling to continue
+      return null;
     }
   }
 }

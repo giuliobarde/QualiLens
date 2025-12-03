@@ -151,6 +151,12 @@ export default function EnhancedProgressBar({
       const pollProgress = async () => {
         try {
           const progressData = await agentService.getProgress(requestId);
+          
+          // If progress data is null (404 or error), skip this poll cycle
+          if (!progressData) {
+            return;
+          }
+          
           setBackendProgress(progressData);
           
           // Update progress percentage
