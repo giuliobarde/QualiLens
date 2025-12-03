@@ -42,6 +42,8 @@ const getCategoryColor = (category: string): { fill: string; stroke: string } =>
   switch (category) {
     case 'bias':
       return { fill: 'rgba(239, 68, 68, 0.3)', stroke: '#ef4444' }; // red
+    case 'limitation':
+      return { fill: 'rgba(234, 179, 8, 0.3)', stroke: '#eab308' }; // yellow
     case 'methodology':
       return { fill: 'rgba(59, 130, 246, 0.3)', stroke: '#3b82f6' }; // blue
     case 'reproducibility':
@@ -76,7 +78,7 @@ export default function EnhancedPDFViewer({
   const [hoveredEvidence, setHoveredEvidence] = useState<EvidenceItem | null>(null);
   const [hoverPosition, setHoverPosition] = useState<{ x: number; y: number } | null>(null);
   const [showHighlights, setShowHighlights] = useState<boolean>(true); // Default: highlights visible
-  const [enabledCategories, setEnabledCategories] = useState<Set<string>>(new Set(['bias', 'methodology', 'reproducibility', 'statistics'])); // All categories enabled by default
+  const [enabledCategories, setEnabledCategories] = useState<Set<string>>(new Set(['bias', 'limitation', 'methodology', 'reproducibility', 'statistics'])); // All categories enabled by default
   const [isExporting, setIsExporting] = useState<boolean>(false);
   const pageRenderingRef = useRef<Set<number>>(new Set());
   const lastScrolledEvidenceIdRef = useRef<string | null>(null);
@@ -908,7 +910,7 @@ export default function EnhancedPDFViewer({
         <div className="bg-blue-50 border-b border-blue-200 px-4 py-2 flex items-center space-x-4 text-xs flex-wrap gap-2">
           <span className="font-semibold text-gray-700">Evidence Highlights:</span>
           
-          {(['bias', 'methodology', 'reproducibility', 'statistics'] as const).map((category) => {
+          {(['bias', 'limitation', 'methodology', 'reproducibility', 'statistics'] as const).map((category) => {
             const isEnabled = enabledCategories.has(category);
             const categoryCount = evidenceTraces.filter(e => e.category === category).length;
             const categoryLabel = category.charAt(0).toUpperCase() + category.slice(1);

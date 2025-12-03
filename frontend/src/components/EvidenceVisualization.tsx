@@ -29,7 +29,7 @@ interface EvidenceVisualizationProps {
   selectedEvidence?: EvidenceItem | null;
 }
 
-type EvidenceCategory = 'all' | 'bias' | 'methodology' | 'reproducibility' | 'statistics';
+type EvidenceCategory = 'all' | 'bias' | 'limitation' | 'methodology' | 'reproducibility' | 'statistics';
 
 function EvidenceVisualization({
   evidenceTraces = [],
@@ -130,6 +130,8 @@ function EvidenceVisualization({
     switch (category) {
       case 'bias':
         return 'bg-red-100 text-red-800 border-red-300';
+      case 'limitation':
+        return 'bg-yellow-100 text-yellow-800 border-yellow-300';
       case 'methodology':
         return 'bg-blue-100 text-blue-800 border-blue-300';
       case 'reproducibility':
@@ -184,7 +186,7 @@ function EvidenceVisualization({
       <div className="px-6 py-4 border-b border-gray-200 bg-gray-50">
         <div className="flex items-center space-x-2 flex-wrap gap-2">
           <span className="text-sm font-medium text-gray-700">Filter:</span>
-          {(['all', 'bias', 'methodology', 'reproducibility', 'statistics'] as EvidenceCategory[]).map((category) => (
+          {(['all', 'bias', 'limitation', 'methodology', 'reproducibility', 'statistics'] as EvidenceCategory[]).map((category) => (
             <button
               key={category}
               onClick={() => handleCategoryChange(category)}

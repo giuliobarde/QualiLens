@@ -440,7 +440,7 @@ class BiasDetectionTool(BaseTool):
                         limitation_evidence = _truncate_at_sentence_boundary(limitation_evidence, 800)
                     
                     evidence_collector.add_evidence(
-                        category="bias",
+                        category="limitation",
                         text_snippet=limitation_evidence,
                         rationale=full_rationale[:2000],
                         confidence=confidence,

@@ -37,6 +37,8 @@ const getCategoryColor = (category: string): string => {
   switch (category) {
     case 'bias':
       return 'rgba(239, 68, 68, 0.4)'; // red-500
+    case 'limitation':
+      return 'rgba(234, 179, 8, 0.4)'; // yellow-500
     case 'methodology':
       return 'rgba(59, 130, 246, 0.4)'; // blue-500
     case 'reproducibility':
@@ -52,6 +54,8 @@ const getCategoryBorderColor = (category: string): string => {
   switch (category) {
     case 'bias':
       return '#ef4444'; // red-500
+    case 'limitation':
+      return '#eab308'; // yellow-500
     case 'methodology':
       return '#3b82f6'; // blue-500
     case 'reproducibility':

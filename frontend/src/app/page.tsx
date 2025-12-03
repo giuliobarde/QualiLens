@@ -860,10 +860,11 @@ export default function Home() {
                   <div className="flex items-center space-x-3 flex-wrap gap-2">
                     <span className={`px-3 py-1.5 rounded-lg text-sm font-semibold ${
                       selectedHighlightEvidence.category === 'bias' ? 'bg-red-100 text-red-800' :
+                      selectedHighlightEvidence.category === 'limitation' ? 'bg-yellow-100 text-yellow-800' :
                       selectedHighlightEvidence.category === 'methodology' ? 'bg-blue-100 text-blue-800' :
                       selectedHighlightEvidence.category === 'reproducibility' ? 'bg-green-100 text-green-800' :
                       selectedHighlightEvidence.category === 'statistics' ? 'bg-purple-100 text-purple-800' :
-                      'bg-yellow-100 text-yellow-800'
+                      'bg-gray-100 text-gray-800'
                     }`}>
                       {selectedHighlightEvidence.category.charAt(0).toUpperCase() + selectedHighlightEvidence.category.slice(1)}
                     </span>
