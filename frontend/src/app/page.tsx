@@ -50,6 +50,210 @@ export default function Home() {
   const [isActionBarVisible, setIsActionBarVisible] = useState(true);
   const lastScrollY = useRef(0);
 
+  // Load persisted state from localStorage on mount
+  useEffect(() => {
+    try {
+      const savedQuery = localStorage.getItem('qualilens_query');
+      const savedAnalysisResult = localStorage.getItem('qualilens_analysis_result');
+      const savedPdfContent = localStorage.getItem('qualilens_pdf_content');
+      const savedFileName = localStorage.getItem('qualilens_file_name');
+      const savedFileSize = localStorage.getItem('qualilens_file_size');
+      const savedProcessingType = localStorage.getItem('qualilens_processing_type');
+      const savedIsPdfExpanded = localStorage.getItem('qualilens_is_pdf_expanded');
+      const savedEvidenceFilter = localStorage.getItem('qualilens_evidence_filter');
+
+      if (savedQuery) {
+        setQuery(savedQuery);
+      }
+      
+      if (savedAnalysisResult) {
+        const parsedResult = JSON.parse(savedAnalysisResult);
+        setAnalysisResult(parsedResult);
+      }
+      
+      if (savedPdfContent) {
+        setPdfContent(savedPdfContent);
+        
+        // Recreate file object if we have file info
+        if (savedFileName && savedFileSize) {
+          // Convert base64 to blob and create File object
+          try {
+            // Extract base64 data (remove data URL prefix if present)
+            const base64Data = savedPdfContent.includes(',') 
+              ? savedPdfContent.split(',')[1] 
+              : savedPdfContent;
+            
+            // Convert base64 to binary
+            const byteCharacters = atob(base64Data);
+            const byteNumbers = new Array(byteCharacters.length);
+            for (let i = 0; i < byteCharacters.length; i++) {
+              byteNumbers[i] = byteCharacters.charCodeAt(i);
+            }
+            const byteArray = new Uint8Array(byteNumbers);
+            const blob = new Blob([byteArray], { type: 'application/pdf' });
+            
+            // Create File object from blob
+            const file = new File([blob], savedFileName, { 
+              type: 'application/pdf',
+              lastModified: Date.now()
+            });
+            
+            setAttachedFile(file);
+          } catch (error) {
+            console.error('Error recreating file from base64:', error);
+            // Fallback: create a minimal File object for display
+            const file = new File([], savedFileName, { type: 'application/pdf' });
+            Object.defineProperty(file, 'size', { value: parseInt(savedFileSize), writable: false });
+            setAttachedFile(file);
+          }
+        }
+      }
+      
+      if (savedProcessingType) {
+        setProcessingType(savedProcessingType as 'upload' | 'analysis' | 'detailed_analysis' | 'parallel_processing');
+      }
+      
+      if (savedIsPdfExpanded) {
+        setIsPdfExpanded(savedIsPdfExpanded === 'true');
+      }
+      
+      if (savedEvidenceFilter) {
+        setEvidenceVisualizationFilter(savedEvidenceFilter);
+      }
+    } catch (error) {
+      console.error('Error loading persisted state:', error);
+    }
+  }, []);
+
+  // Save state to localStorage whenever it changes
+  useEffect(() => {
+    try {
+      if (query) {
+        localStorage.setItem('qualilens_query', query);
+      } else {
+        localStorage.removeItem('qualilens_query');
+      }
+    } catch (error: any) {
+      console.error('Error saving query:', error);
+      // Handle quota exceeded error
+      if (error.name === 'QuotaExceededError' || error.code === 22) {
+        console.warn('localStorage quota exceeded, clearing old data');
+        try {
+          // Clear old data and try again
+          localStorage.removeItem('qualilens_query');
+          if (query) {
+            localStorage.setItem('qualilens_query', query);
+          }
+        } catch (retryError) {
+          console.error('Failed to save query after clearing:', retryError);
+        }
+      }
+    }
+  }, [query]);
+
+  useEffect(() => {
+    try {
+      if (analysisResult) {
+        localStorage.setItem('qualilens_analysis_result', JSON.stringify(analysisResult));
+      } else {
+        localStorage.removeItem('qualilens_analysis_result');
+      }
+    } catch (error: any) {
+      console.error('Error saving analysis result:', error);
+      // Handle quota exceeded error
+      if (error.name === 'QuotaExceededError' || error.code === 22) {
+        console.warn('localStorage quota exceeded, clearing old data');
+        try {
+          // Clear old PDF content first (it's usually the largest)
+          localStorage.removeItem('qualilens_pdf_content');
+          if (analysisResult) {
+            localStorage.setItem('qualilens_analysis_result', JSON.stringify(analysisResult));
+          }
+        } catch (retryError) {
+          console.error('Failed to save analysis result after clearing:', retryError);
+        }
+      }
+    }
+  }, [analysisResult]);
+
+  useEffect(() => {
+    try {
+      if (pdfContent) {
+        // If it's a blob URL, we need to convert it to base64 before saving
+        if (pdfContent.startsWith('blob:')) {
+          // Don't save blob URLs as they won't work after reload
+          // Instead, we'll keep the blob URL in memory but not persist it
+          // The user will need to re-upload if they reload
+          return;
+        } else {
+          // It's already base64, save it
+          localStorage.setItem('qualilens_pdf_content', pdfContent);
+        }
+      } else {
+        localStorage.removeItem('qualilens_pdf_content');
+        localStorage.removeItem('qualilens_file_name');
+        localStorage.removeItem('qualilens_file_size');
+      }
+    } catch (error: any) {
+      console.error('Error saving PDF content:', error);
+      // Handle quota exceeded error - PDF content can be large
+      if (error.name === 'QuotaExceededError' || error.code === 22) {
+        console.warn('localStorage quota exceeded, PDF content too large to persist');
+        // Try to clear old PDF content and save again
+        try {
+          localStorage.removeItem('qualilens_pdf_content');
+          if (pdfContent && !pdfContent.startsWith('blob:')) {
+            // Only try to save if it's not too large (rough estimate: base64 is ~33% larger)
+            const estimatedSize = pdfContent.length * 0.75; // Rough estimate of original size
+            if (estimatedSize < 5 * 1024 * 1024) { // Only save if less than 5MB
+              localStorage.setItem('qualilens_pdf_content', pdfContent);
+            }
+          }
+        } catch (retryError) {
+          console.error('Failed to save PDF content after clearing:', retryError);
+        }
+      }
+    }
+  }, [pdfContent]);
+
+  useEffect(() => {
+    try {
+      if (attachedFile) {
+        localStorage.setItem('qualilens_file_name', attachedFile.name);
+        localStorage.setItem('qualilens_file_size', attachedFile.size.toString());
+      } else {
+        localStorage.removeItem('qualilens_file_name');
+        localStorage.removeItem('qualilens_file_size');
+      }
+    } catch (error) {
+      console.error('Error saving file info:', error);
+    }
+  }, [attachedFile]);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem('qualilens_processing_type', processingType);
+    } catch (error) {
+      console.error('Error saving processing type:', error);
+    }
+  }, [processingType]);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem('qualilens_is_pdf_expanded', isPdfExpanded.toString());
+    } catch (error) {
+      console.error('Error saving PDF expanded state:', error);
+    }
+  }, [isPdfExpanded]);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem('qualilens_evidence_filter', evidenceVisualizationFilter);
+    } catch (error) {
+      console.error('Error saving evidence filter:', error);
+    }
+  }, [evidenceVisualizationFilter]);
+
   // Cleanup object URLs on component unmount
   useEffect(() => {
     return () => {
@@ -177,7 +381,23 @@ export default function Home() {
     setAttachedFile(null);
     setPdfContent(null);
     setAnalysisResult(null);
+    setQuery('');
     setError(null);
+    
+    // Clear localStorage
+    try {
+      localStorage.removeItem('qualilens_query');
+      localStorage.removeItem('qualilens_analysis_result');
+      localStorage.removeItem('qualilens_pdf_content');
+      localStorage.removeItem('qualilens_file_name');
+      localStorage.removeItem('qualilens_file_size');
+      localStorage.removeItem('qualilens_processing_type');
+      localStorage.removeItem('qualilens_is_pdf_expanded');
+      localStorage.removeItem('qualilens_evidence_filter');
+    } catch (error) {
+      console.error('Error clearing localStorage:', error);
+    }
+    
     if (fileInputRef.current) {
       fileInputRef.current.value = '';
     }
@@ -366,6 +586,27 @@ export default function Home() {
         setAnalysisResult(response.result);
         console.log('✅ Analysis result set successfully');
         console.log('Analysis result keys:', Object.keys(response.result));
+        
+        // Convert blob URL to base64 for persistence if needed
+        if (pdfContent && pdfContent.startsWith('blob:') && attachedFile) {
+          // Only convert if file is not too large (to avoid memory issues)
+          if (attachedFile.size <= 10 * 1024 * 1024) { // 10MB limit
+            fetch(pdfContent)
+              .then(res => res.blob())
+              .then(blob => {
+                const reader = new FileReader();
+                reader.onload = (e) => {
+                  const base64 = e.target?.result as string;
+                  setPdfContent(base64);
+                };
+                reader.readAsDataURL(blob);
+              })
+              .catch(err => {
+                console.warn('Could not convert blob URL to base64:', err);
+                // Keep the blob URL - it will work until page reload
+              });
+          }
+        }
       } else {
         setAnalysisResult(null);
         const errorMsg = response.error_message || 'Unknown error occurred';
