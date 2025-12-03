@@ -429,94 +429,205 @@ class MethodologyAnalyzerTool(BaseTool):
         Returns detailed information about each methodology including quality assessment.
         """
         try:
-            # Use more text for better methodology detection (12000 chars instead of 8000)
-            # Focus on the beginning (where methods are often described) and look for methodology keywords
-            text_to_analyze = text_content[:12000]
-
-            # Try to find and prioritize methodology sections
-            text_lower = text_content[:20000].lower()
-            method_indicators = ["methods", "methodology", "study design", "experimental design",
-                               "materials and methods", "participants", "procedure", "data collection"]
-
-            # Look for methodology section and extract more context from there
+            # Comprehensive text extraction strategy:
+            # 1. Extract methodology sections (methods, methodology, study design, etc.)
+            # 2. Extract abstract and introduction (often mention methodologies)
+            # 3. Extract results section (may describe methods used)
+            # 4. Combine all methodology-related content
+            
+            text_lower = text_content.lower()
+            text_to_analyze_parts = []
+            
+            # Expanded methodology section indicators
+            method_indicators = [
+                "methods", "methodology", "method", "study design", "experimental design",
+                "materials and methods", "participants", "procedure", "data collection",
+                "research design", "study protocol", "experimental procedure", "methodological",
+                "sampling", "data analysis", "statistical analysis", "analytical approach"
+            ]
+            
+            # Find ALL methodology sections (not just the first one)
+            methodology_sections = []
             for indicator in method_indicators:
+                # Find all occurrences
+                start = 0
+                while True:
+                    pos = text_lower.find(indicator, start)
+                    if pos == -1:
+                        break
+                    # Extract large chunk around each methodology section
+                    section_start = max(0, pos - 1000)
+                    section_end = min(len(text_content), pos + 15000)  # Increased from 10000
+                    methodology_sections.append((section_start, section_end))
+                    start = pos + 1
+            
+            # Remove overlapping sections and merge
+            if methodology_sections:
+                methodology_sections.sort()
+                merged_sections = []
+                current_start, current_end = methodology_sections[0]
+                for start, end in methodology_sections[1:]:
+                    if start <= current_end:
+                        current_end = max(current_end, end)
+                    else:
+                        merged_sections.append((current_start, current_end))
+                        current_start, current_end = start, end
+                merged_sections.append((current_start, current_end))
+                
+                # Combine all methodology sections
+                for start, end in merged_sections:
+                    text_to_analyze_parts.append(text_content[start:end])
+                    logger.info(f"Extracted methodology section: {end-start} chars from position {start}")
+            
+            # Also extract abstract and introduction (often mention methodologies)
+            abstract_indicators = ["abstract", "summary", "background"]
+            intro_indicators = ["introduction", "background", "literature review"]
+            
+            for indicator in abstract_indicators:
                 pos = text_lower.find(indicator)
-                if pos > 0:
-                    # Extract a large chunk around the methodology section
-                    start = max(0, pos - 500)
-                    end = min(len(text_content), pos + 10000)
-                    text_to_analyze = text_content[start:end]
-                    logger.info(f"Found '{indicator}' section at position {pos}, using focused extraction")
+                if pos > 0 and pos < 5000:  # Abstract is usually early
+                    section_start = max(0, pos - 200)
+                    section_end = min(len(text_content), pos + 3000)
+                    text_to_analyze_parts.append(text_content[section_start:section_end])
+                    logger.info(f"Extracted {indicator} section for methodology context")
                     break
+            
+            for indicator in intro_indicators:
+                pos = text_lower.find(indicator)
+                if pos > 0 and pos < 10000:  # Introduction is usually early
+                    section_start = max(0, pos - 200)
+                    section_end = min(len(text_content), pos + 5000)
+                    text_to_analyze_parts.append(text_content[section_start:section_end])
+                    logger.info(f"Extracted {indicator} section for methodology context")
+                    break
+            
+            # If no specific sections found, use comprehensive text sampling
+            if not text_to_analyze_parts:
+                # Sample from beginning, middle, and end of paper
+                text_length = len(text_content)
+                chunk_size = min(20000, text_length // 3)
+                text_to_analyze_parts = [
+                    text_content[:chunk_size * 2],  # First 2/3
+                    text_content[chunk_size:chunk_size * 2] if text_length > chunk_size else "",
+                ]
+                logger.info("No specific methodology sections found, using comprehensive sampling")
+            
+            # Combine all parts, removing duplicates and limiting total size
+            combined_text = "\n\n--- SECTION BREAK ---\n\n".join(text_to_analyze_parts)
+            # Limit to 50000 chars to stay within token limits but be comprehensive
+            if len(combined_text) > 50000:
+                # Prioritize methodology sections
+                combined_text = combined_text[:50000]
+                logger.info(f"Combined text truncated to 50000 chars (was {len(combined_text)})")
+            
+            text_to_analyze = combined_text if combined_text else text_content[:30000]  # Fallback
 
             prompt = f"""
-Analyze this research paper to identify ALL methodologies used. Be comprehensive and detect multiple methodologies if present.
+You are an expert research methodology analyst. Your task is to identify ALL research methodologies used in this paper. 
+Be EXTREMELY thorough and comprehensive. Look for methodologies mentioned anywhere in the text - not just in the methods section.
+Many papers use multiple methodologies, and some methodologies may be mentioned in the abstract, introduction, or results sections.
 
-PAPER CONTENT (focused on methodology sections):
+CRITICAL INSTRUCTIONS:
+1. Find EVERY methodology mentioned, even if it's just briefly described
+2. Look for methodologies in ALL sections: abstract, introduction, methods, results, discussion
+3. Don't just look for explicit statements - also look for methodological descriptions, procedures, and approaches
+4. A single paper may use 2-5+ different methodologies (e.g., RCT + qualitative interviews + survey + meta-analysis)
+5. Be generous in detection - if there's any indication of a methodology, include it
+
+PAPER CONTENT (comprehensive extraction from multiple sections):
 {text_to_analyze}
 
-Identify ALL methodologies from these categories and provide detailed assessment:
+Identify ALL methodologies from these comprehensive categories:
 
 1. **Experimental Methods:**
-   - Randomized Controlled Trial (RCT)
-   - Quasi-Experimental Design
-   - Laboratory Experiment
-   - Field Experiment
-   - A/B Testing
-   - Factorial Design
-   - Crossover Design
+   - Randomized Controlled Trial (RCT) / Randomized Trial
+   - Quasi-Experimental Design / Quasi-Randomized
+   - Laboratory Experiment / Lab Study
+   - Field Experiment / Field Study
+   - A/B Testing / Split Testing
+   - Factorial Design / Factorial Experiment
+   - Crossover Design / Crossover Trial
+   - Before-After Study / Pre-Post Design
+   - Controlled Trial / Controlled Experiment
+   - Pilot Study / Feasibility Study
+   - Intervention Study
 
 2. **Observational Methods:**
    - Cohort Study (Prospective/Retrospective)
    - Case-Control Study
-   - Cross-Sectional Study
-   - Longitudinal Study
-   - Ecological Study
-   - Time Series Analysis
+   - Cross-Sectional Study / Cross-Sectional Survey
+   - Longitudinal Study / Longitudinal Survey
+   - Ecological Study / Ecological Analysis
+   - Time Series Analysis / Time Series Study
+   - Case-Crossover Study
+   - Nested Case-Control Study
+   - Registry Study / Registry-Based Study
 
 3. **Qualitative Methods:**
-   - Ethnography
+   - Ethnography / Ethnographic Study
    - Grounded Theory
-   - Phenomenology
-   - Case Study
-   - Narrative Analysis
+   - Phenomenology / Phenomenological Study
+   - Case Study / Case Series
+   - Narrative Analysis / Narrative Inquiry
    - Discourse Analysis
    - Content Analysis
    - Thematic Analysis
-   - Participatory Action Research
+   - Participatory Action Research (PAR)
+   - Focus Groups / Focus Group Discussion
+   - In-Depth Interviews / Semi-Structured Interviews
+   - Structured Interviews
+   - Delphi Method / Delphi Study
+   - Hermeneutics
 
 4. **Mixed Methods:**
-   - Convergent Design
+   - Convergent Design / Convergent Parallel Design
    - Explanatory Sequential Design
    - Exploratory Sequential Design
-   - Embedded Design
+   - Embedded Design / Embedded Mixed Methods
    - Transformative Design
+   - Multiphase Design
 
 5. **Survey & Sampling Methods:**
    - Cross-Sectional Survey
    - Longitudinal Survey
-   - Panel Study
-   - Probability Sampling
-   - Non-Probability Sampling
+   - Panel Study / Panel Survey
+   - Probability Sampling / Random Sampling
+   - Non-Probability Sampling / Convenience Sampling
    - Stratified Sampling
    - Cluster Sampling
+   - Systematic Sampling
+   - Purposive Sampling
+   - Snowball Sampling
+   - Quota Sampling
 
 6. **Review Methods:**
    - Systematic Review
-   - Meta-Analysis
+   - Meta-Analysis / Meta-Analytic Review
    - Scoping Review
    - Rapid Review
    - Umbrella Review
-   - Narrative Review
+   - Narrative Review / Literature Review
+   - Integrative Review
+   - Realist Review
+   - Critical Review
 
 7. **Specialized Methods:**
-   - Single-Case Design
-   - N-of-1 Trial
-   - Simulation Study
-   - Modeling Study
-   - Secondary Data Analysis
+   - Single-Case Design / Single-Subject Design
+   - N-of-1 Trial / Single-Patient Trial
+   - Simulation Study / Simulation Modeling
+   - Modeling Study / Mathematical Modeling
+   - Secondary Data Analysis / Secondary Analysis
    - Registry-Based Study
-   - Comparative Effectiveness Research
+   - Comparative Effectiveness Research (CER)
+   - Cost-Effectiveness Analysis
+   - Decision Analysis
+   - Network Meta-Analysis
+   - Bayesian Analysis
+   - Machine Learning / AI Methods
+   - Data Mining
+   - Text Mining / Text Analysis
+   - Bibliometric Analysis
+   - Scientometric Analysis
 
 For EACH methodology detected, provide:
 {{
@@ -568,15 +679,74 @@ For EACH methodology detected, provide:
   "overall_methodological_approach": "Brief description of the overall approach (e.g., 'Multi-center randomized controlled trial with qualitative interviews')"
 }}
 
-Be thorough and look for:
-- Explicit methodology statements ("We conducted a...", "This randomized controlled trial...")
-- Study design descriptions
-- Sampling procedures
-- Data collection methods
-- Analysis approaches
-- References to methodological frameworks
+Be EXTREMELY thorough and look for methodologies in ALL of these ways:
 
-CRITICAL: For "evidence_text", you MUST provide the EXACT word-for-word text from the paper. Do NOT paraphrase, summarize, or reword. Copy the text exactly as it appears in the paper. This is essential for accurate PDF highlighting.
+**Explicit Methodology Statements:**
+- "We conducted a [methodology]..."
+- "This [methodology] was used..."
+- "A [methodology] design was employed..."
+- "The study used [methodology]..."
+- "We performed a [methodology]..."
+- "This [methodology] study..."
+
+**Study Design Descriptions:**
+- Descriptions of randomization procedures
+- Control group descriptions
+- Intervention descriptions
+- Comparison group descriptions
+- Study protocol descriptions
+
+**Sampling Procedures:**
+- Random sampling → Randomized Controlled Trial or Experimental Design
+- Convenience sampling → Non-Probability Sampling or Cross-Sectional Survey
+- Stratified sampling → Stratified Sampling methodology
+- Cluster sampling → Cluster Sampling methodology
+- Purposive sampling → Qualitative methods (interviews, focus groups)
+- Snowball sampling → Qualitative or Survey methods
+
+**Data Collection Methods:**
+- Surveys/questionnaires → Survey methodology
+- Interviews (structured/semi-structured/unstructured) → Qualitative Interview methodology
+- Focus groups → Focus Group methodology
+- Observations → Observational Study or Ethnography
+- Experiments → Experimental methodology
+- Secondary data → Secondary Data Analysis
+- Registry data → Registry-Based Study
+
+**Analysis Approaches:**
+- Statistical tests (t-test, ANOVA, regression) → Quantitative/Experimental methodology
+- Thematic analysis → Thematic Analysis methodology
+- Content analysis → Content Analysis methodology
+- Meta-analysis → Meta-Analysis methodology
+- Grounded theory → Grounded Theory methodology
+- Case study analysis → Case Study methodology
+
+**Methodological Frameworks:**
+- References to CONSORT → RCT or Experimental Trial
+- References to STROBE → Observational Study
+- References to PRISMA → Systematic Review or Meta-Analysis
+- References to COREQ → Qualitative Study
+- References to specific methodological approaches
+
+**Look for methodologies mentioned in:**
+- Abstract: Often summarizes the main methodology
+- Introduction: May describe the methodological approach
+- Methods section: Primary location for methodology details
+- Results section: May describe methods used for analysis
+- Discussion: May reference methodologies used
+
+**IMPORTANT DETECTION STRATEGY:**
+1. Scan the ENTIRE provided text, not just the methods section
+2. Look for methodology keywords in ANY context
+3. If you see "randomized" → likely RCT or Randomized Trial
+4. If you see "survey" or "questionnaire" → Survey methodology
+5. If you see "interview" or "focus group" → Qualitative methodology
+6. If you see "cohort" → Cohort Study
+7. If you see "case-control" → Case-Control Study
+8. If you see "systematic review" or "meta-analysis" → Review methodology
+9. If you see multiple methods mentioned → Multiple methodologies (list ALL)
+
+**CRITICAL: For "evidence_text", you MUST provide the EXACT word-for-word text from the paper. Do NOT paraphrase, summarize, or reword. Copy the text exactly as it appears in the paper. This is essential for accurate PDF highlighting.**
 
 CRITICAL: For each methodology, analyze how it affects reproducibility and quality:
 
@@ -622,14 +792,22 @@ CRITICAL: For each methodology, analyze how it affects reproducibility and quali
 
 For each methodology, provide a thoughtful analysis of how it typically affects reproducibility based on the methodology type itself, not just the specific implementation in this paper.
 
-Return ONLY valid JSON. If no clear methodology is found, return an empty methodologies array.
+**FINAL REMINDER - BE COMPREHENSIVE:**
+- Most research papers use MULTIPLE methodologies (e.g., RCT + survey + qualitative interviews)
+- Don't stop at the first methodology you find - keep looking for more
+- Even if a methodology is only briefly mentioned, include it
+- If you're unsure whether something is a methodology, err on the side of including it
+- A typical paper should have 1-5 methodologies detected
+- If you only find 1 methodology, you're probably missing others - look harder!
+
+Return ONLY valid JSON. The methodologies array should contain ALL methodologies found. If you find multiple methodologies, list them ALL. If no clear methodology is found, return an empty methodologies array.
 """
 
             llm_response = self._get_openai_client().generate_completion(
                 prompt=prompt,
                 model="gpt-4o-mini",
-                max_tokens=4000,
-                temperature=0.0
+                max_tokens=6000,  # Increased from 4000 to allow for more methodologies
+                temperature=0.1  # Slightly increased from 0.0 to allow for more creative detection while staying consistent
             )
 
             if llm_response:
@@ -641,7 +819,15 @@ Return ONLY valid JSON. If no clear methodology is found, return an empty method
                     if json_match:
                         json_str = json_match.group(0)
                         result = json.loads(json_str)
-                        logger.info(f"✅ Detected {len(result.get('methodologies', []))} methodologies")
+                        methodologies_count = len(result.get('methodologies', []))
+                        logger.info(f"✅ Detected {methodologies_count} methodologies in first pass")
+                        
+                        # Fallback: If very few methodologies detected, do a second pass with broader search
+                        if methodologies_count <= 1 and len(text_content) > 5000:
+                            logger.info(f"⚠️ Only {methodologies_count} methodology(ies) detected. Performing second pass with broader search...")
+                            result = self._detect_methodologies_second_pass(text_content, result)
+                            logger.info(f"✅ After second pass: {len(result.get('methodologies', []))} methodologies detected")
+                        
                         return result
                     else:
                         logger.error("No JSON found in LLM response")
@@ -658,7 +844,158 @@ Return ONLY valid JSON. If no clear methodology is found, return an empty method
         except Exception as e:
             logger.error(f"Methodology detection failed: {str(e)}")
             return {"methodologies": [], "primary_methodology": "unknown", "error": str(e)}
+    
+    def _detect_methodologies_second_pass(self, text_content: str, first_pass_result: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        Second pass methodology detection with broader, more aggressive search.
+        Used when first pass detects very few methodologies.
+        """
+        try:
+            # Use even more comprehensive text extraction - sample from entire paper
+            text_length = len(text_content)
+            # Extract from multiple sections: beginning, middle, end
+            chunk_size = min(25000, text_length // 4)
+            text_samples = []
+            
+            # Beginning (abstract, intro, methods)
+            text_samples.append(text_content[:chunk_size * 2])
+            
+            # Middle section
+            if text_length > chunk_size * 2:
+                mid_start = text_length // 3
+                text_samples.append(text_content[mid_start:mid_start + chunk_size])
+            
+            # End section (discussion, conclusion)
+            if text_length > chunk_size:
+                text_samples.append(text_content[-chunk_size * 2:])
+            
+            combined_text = "\n\n--- SECTION BREAK ---\n\n".join(text_samples)
+            if len(combined_text) > 60000:
+                combined_text = combined_text[:60000]
+            
+            # Create a more aggressive prompt focused on finding ANY methodology mentions
+            prompt = f"""
+You are conducting a SECOND PASS methodology detection because the first pass found very few methodologies.
+This suggests methodologies may be mentioned in less obvious places or using different terminology.
 
+FIRST PASS RESULT: {len(first_pass_result.get('methodologies', []))} methodology(ies) found
+- {', '.join([m.get('type', 'Unknown') for m in first_pass_result.get('methodologies', [])])}
+
+PAPER CONTENT (comprehensive sampling from entire paper):
+{combined_text}
+
+TASK: Find ALL additional methodologies that may have been missed. Look for:
+1. Methodologies mentioned in passing or briefly
+2. Methodologies described using different terminology
+3. Methodologies in results or discussion sections
+4. Analysis methodologies (statistical, qualitative analysis methods)
+5. Data collection methodologies
+6. Sampling methodologies
+7. Any research approach, design, or method mentioned
+
+Look for these keywords and patterns throughout the ENTIRE text:
+- "randomized", "randomization" → RCT or Randomized Trial
+- "survey", "questionnaire" → Survey methodology
+- "interview", "focus group" → Qualitative methodology
+- "cohort", "follow-up" → Cohort Study
+- "case-control", "case control" → Case-Control Study
+- "cross-sectional" → Cross-Sectional Study
+- "longitudinal" → Longitudinal Study
+- "systematic review", "meta-analysis" → Review methodology
+- "experiment", "experimental" → Experimental methodology
+- "qualitative", "quantitative" → Qualitative/Quantitative methodology
+- "mixed methods" → Mixed Methods
+- "case study", "case series" → Case Study
+- "ethnography", "ethnographic" → Ethnography
+- "grounded theory" → Grounded Theory
+- "thematic analysis" → Thematic Analysis
+- "content analysis" → Content Analysis
+- "simulation", "modeling" → Simulation/Modeling Study
+- "secondary data" → Secondary Data Analysis
+
+Return JSON with ONLY the ADDITIONAL methodologies found (not the ones from first pass):
+{{
+  "additional_methodologies": [
+    {{
+      "type": "Methodology name",
+      "category": "Category",
+      "confidence": 0.0-1.0,
+      "evidence_text": "EXACT text snippet from paper",
+      "page_indicators": ["Location in paper"],
+      "quality_assessment": {{
+        "is_appropriate": true/false,
+        "rationale": "Brief rationale",
+        "strengths": ["Strength 1"],
+        "weaknesses": ["Weakness 1"],
+        "quality_rating": "excellent/good/fair/poor/very_poor"
+      }},
+      "reproducibility_impact": {{
+        "baseline_reproducibility": "high/medium/low",
+        "reproducibility_rationale": "Brief rationale"
+      }},
+      "methodology_characteristics": {{
+        "standardization_level": "high/medium/low",
+        "documentation_requirements": "high/medium/low",
+        "context_dependency": "high/medium/low"
+      }},
+      "implementation_quality": {{
+        "measurement_validity": "high/medium/low",
+        "reporting_completeness": "complete/partial/incomplete"
+      }}
+    }}
+  ]
+}}
+
+Be aggressive - if there's ANY indication of a methodology, include it. Return ONLY valid JSON.
+"""
+            
+            llm_response = self._get_openai_client().generate_completion(
+                prompt=prompt,
+                model="gpt-4o-mini",
+                max_tokens=4000,
+                temperature=0.2  # Slightly higher for more creative detection
+            )
+            
+            if llm_response:
+                try:
+                    import re
+                    json_match = re.search(r'\{.*\}', llm_response, re.DOTALL)
+                    if json_match:
+                        json_str = json_match.group(0)
+                        second_pass_result = json.loads(json_str)
+                        additional_methodologies = second_pass_result.get('additional_methodologies', [])
+                        
+                        if additional_methodologies:
+                            # Merge with first pass results
+                            existing_methodologies = first_pass_result.get('methodologies', [])
+                            # Avoid duplicates by checking methodology type
+                            existing_types = {m.get('type', '').lower() for m in existing_methodologies}
+                            
+                            for new_method in additional_methodologies:
+                                new_type = new_method.get('type', '').lower()
+                                if new_type and new_type not in existing_types:
+                                    existing_methodologies.append(new_method)
+                                    existing_types.add(new_type)
+                                    logger.info(f"✅ Added additional methodology: {new_method.get('type', 'Unknown')}")
+                            
+                            first_pass_result['methodologies'] = existing_methodologies
+                            logger.info(f"✅ Merged results: {len(existing_methodologies)} total methodologies")
+                        
+                        return first_pass_result
+                    else:
+                        logger.warning("No JSON found in second pass response")
+                        return first_pass_result
+                except json.JSONDecodeError as e:
+                    logger.warning(f"Failed to parse second pass response: {str(e)}")
+                    return first_pass_result
+            else:
+                logger.warning("No response from LLM for second pass")
+                return first_pass_result
+                
+        except Exception as e:
+            logger.error(f"Second pass methodology detection failed: {str(e)}")
+            return first_pass_result
+    
     def _detect_research_field(self, text_content: str) -> Dict[str, Any]:
         """Detect the primary research field based on content analysis."""
         try:

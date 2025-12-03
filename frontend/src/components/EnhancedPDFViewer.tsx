@@ -34,6 +34,7 @@ interface EnhancedPDFViewerProps {
   evidenceTraces?: EvidenceItem[];
   selectedEvidenceId?: string | null;
   onEvidenceClick?: (evidence: EvidenceItem) => void;
+  onEvidenceSelect?: (evidence: EvidenceItem) => void; // For keyboard navigation without opening modal
   onExportFunctionsReady?: (functions: { exportCurrentPage: () => void; exportAllPages: () => void }) => void;
   initialScale?: number;
 }
@@ -61,6 +62,7 @@ export default function EnhancedPDFViewer({
   evidenceTraces = [],
   selectedEvidenceId,
   onEvidenceClick,
+  onEvidenceSelect,
   onExportFunctionsReady,
   initialScale = 1.0
 }: EnhancedPDFViewerProps) {
@@ -89,6 +91,89 @@ export default function EnhancedPDFViewer({
     // Filter by enabled categories only (no external category filter)
     return evidenceTraces.filter(e => enabledCategories.has(e.category));
   }, [evidenceTraces, enabledCategories]);
+  
+  // Create sorted list of all evidences for navigation (sorted by page, then by position)
+  const sortedEvidenceList = useMemo(() => {
+    return filteredEvidence
+      .filter(e => e.page_number && e.bounding_box) // Only include evidences with valid page and bbox
+      .sort((a, b) => {
+        // First sort by page number
+        const pageA = a.page_number || 0;
+        const pageB = b.page_number || 0;
+        if (pageA !== pageB) {
+          return pageA - pageB;
+        }
+        // Then sort by vertical position (top to bottom)
+        const yA = a.bounding_box?.y || 0;
+        const yB = b.bounding_box?.y || 0;
+        if (yA !== yB) {
+          return yA - yB;
+        }
+        // Finally sort by horizontal position (left to right)
+        const xA = a.bounding_box?.x || 0;
+        const xB = b.bounding_box?.x || 0;
+        return xA - xB;
+      });
+  }, [filteredEvidence]);
+  
+  // Find current evidence index
+  const currentEvidenceIndex = useMemo(() => {
+    if (!selectedEvidenceId) return -1;
+    return sortedEvidenceList.findIndex(e => e.id === selectedEvidenceId);
+  }, [selectedEvidenceId, sortedEvidenceList]);
+  
+  // Navigation functions
+  const navigateToEvidence = useCallback((index: number) => {
+    if (index < 0 || index >= sortedEvidenceList.length) return;
+    const evidence = sortedEvidenceList[index];
+    // Use onEvidenceSelect for keyboard navigation (doesn't open modal)
+    // Fall back to onEvidenceClick if onEvidenceSelect is not provided
+    if (onEvidenceSelect) {
+      onEvidenceSelect(evidence);
+    } else if (onEvidenceClick) {
+      onEvidenceClick(evidence);
+    }
+  }, [sortedEvidenceList, onEvidenceSelect, onEvidenceClick]);
+  
+  const navigateToPreviousEvidence = useCallback(() => {
+    if (currentEvidenceIndex > 0) {
+      navigateToEvidence(currentEvidenceIndex - 1);
+    } else if (sortedEvidenceList.length > 0) {
+      // Wrap around to last evidence
+      navigateToEvidence(sortedEvidenceList.length - 1);
+    }
+  }, [currentEvidenceIndex, navigateToEvidence, sortedEvidenceList.length]);
+  
+  const navigateToNextEvidence = useCallback(() => {
+    if (currentEvidenceIndex < sortedEvidenceList.length - 1) {
+      navigateToEvidence(currentEvidenceIndex + 1);
+    } else if (sortedEvidenceList.length > 0) {
+      // Wrap around to first evidence
+      navigateToEvidence(0);
+    }
+  }, [currentEvidenceIndex, navigateToEvidence, sortedEvidenceList.length]);
+  
+  // Keyboard navigation
+  useEffect(() => {
+    const handleKeyDown = (event: KeyboardEvent) => {
+      // Only handle if not typing in an input field
+      if (event.target instanceof HTMLInputElement || event.target instanceof HTMLTextAreaElement) {
+        return;
+      }
+      
+      // Check if PDF viewer is focused or if we're in the document
+      if (event.key === 'ArrowLeft' || event.key === 'ArrowUp') {
+        event.preventDefault();
+        navigateToPreviousEvidence();
+      } else if (event.key === 'ArrowRight' || event.key === 'ArrowDown') {
+        event.preventDefault();
+        navigateToNextEvidence();
+      }
+    };
+    
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [navigateToPreviousEvidence, navigateToNextEvidence]);
 
   // Group evidence by page - use useMemo to prevent recreation on every render
   const evidenceByPage = useMemo(() => {
@@ -912,24 +997,89 @@ export default function EnhancedPDFViewer({
     <div className="w-full h-full flex flex-col bg-gray-50">
       {/* Controls */}
       <div className="bg-white border-b border-gray-200 px-4 py-3 flex items-center justify-between shadow-sm">
-        <div className="flex items-center space-x-4">
-          <button
-            onClick={() => setCurrentPage(Math.max(1, currentPage - 1))}
-            disabled={currentPage === 1}
-            className="px-3 py-1.5 bg-gray-100 hover:bg-gray-200 rounded-lg disabled:opacity-50 disabled:cursor-not-allowed text-sm font-medium transition-all"
-          >
-            Previous
-          </button>
-          <span className="text-sm text-gray-700 font-medium">
-            Page {currentPage} of {numPages}
-          </span>
-          <button
-            onClick={() => setCurrentPage(Math.min(numPages, currentPage + 1))}
-            disabled={currentPage === numPages}
-            className="px-3 py-1.5 bg-gray-100 hover:bg-gray-200 rounded-lg disabled:opacity-50 disabled:cursor-not-allowed text-sm font-medium transition-all"
-          >
-            Next
-          </button>
+        <div className="flex items-center space-x-3 flex-wrap gap-2">
+          {/* Page Navigation */}
+          <div className="flex items-center space-x-1">
+            <button
+              onClick={() => setCurrentPage(Math.max(1, currentPage - 1))}
+              disabled={currentPage === 1}
+              className="p-1.5 hover:bg-gray-100 rounded disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
+              title="Previous page"
+            >
+              <svg className="w-4 h-4 text-gray-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
+              </svg>
+            </button>
+            <span className="text-xs text-gray-600 min-w-[60px] text-center">
+              {currentPage}/{numPages}
+            </span>
+            <button
+              onClick={() => setCurrentPage(Math.min(numPages, currentPage + 1))}
+              disabled={currentPage === numPages}
+              className="p-1.5 hover:bg-gray-100 rounded disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
+              title="Next page"
+            >
+              <svg className="w-4 h-4 text-gray-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+              </svg>
+            </button>
+          </div>
+          
+          {/* Evidence Navigation */}
+          {sortedEvidenceList.length > 0 && (
+            <div className="flex items-center space-x-1 pl-2 border-l border-gray-200">
+              <button
+                onClick={navigateToPreviousEvidence}
+                disabled={sortedEvidenceList.length === 0}
+                className="p-1.5 hover:bg-blue-50 rounded disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
+                title="Previous Evidence (← or ↑)"
+              >
+                <svg className="w-4 h-4 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
+                </svg>
+              </button>
+              <div className="flex items-center space-x-1.5">
+                {sortedEvidenceList.length > 1 ? (
+                  <select
+                    value={currentEvidenceIndex >= 0 ? currentEvidenceIndex : ''}
+                    onChange={(e) => {
+                      const index = parseInt(e.target.value);
+                      if (!isNaN(index)) {
+                        navigateToEvidence(index);
+                      }
+                    }}
+                    className="text-xs text-gray-700 bg-transparent border-0 focus:outline-none focus:ring-0 cursor-pointer hover:text-blue-600 transition-colors"
+                    title="Jump to evidence"
+                  >
+                    {sortedEvidenceList.map((evidence, index) => (
+                      <option key={evidence.id} value={index}>
+                        {index + 1}/{sortedEvidenceList.length} - {evidence.category}
+                      </option>
+                    ))}
+                  </select>
+                ) : (
+                  <span className="text-xs text-gray-600">
+                    {currentEvidenceIndex >= 0 ? `${currentEvidenceIndex + 1}/${sortedEvidenceList.length}` : sortedEvidenceList.length}
+                  </span>
+                )}
+                {currentEvidenceIndex >= 0 && sortedEvidenceList[currentEvidenceIndex] && (
+                  <span className="text-xs text-gray-500 capitalize">
+                    {sortedEvidenceList[currentEvidenceIndex].category}
+                  </span>
+                )}
+              </div>
+              <button
+                onClick={navigateToNextEvidence}
+                disabled={sortedEvidenceList.length === 0}
+                className="p-1.5 hover:bg-blue-50 rounded disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
+                title="Next Evidence (→ or ↓)"
+              >
+                <svg className="w-4 h-4 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+                </svg>
+              </button>
+            </div>
+          )}
         </div>
 
         <div className="flex items-center space-x-4">

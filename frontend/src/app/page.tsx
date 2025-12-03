@@ -182,23 +182,51 @@ export default function Home() {
   useEffect(() => {
     try {
       if (analysisResult) {
-        localStorage.setItem('qualilens_analysis_result', JSON.stringify(analysisResult));
+        const serializedResult = JSON.stringify(analysisResult);
+        const resultSize = serializedResult.length;
+        const maxSize = 2 * 1024 * 1024; // 2MB limit for analysis results
+        
+        // Check size before saving
+        if (resultSize > maxSize) {
+          console.warn(
+            `Analysis result too large to persist (${(resultSize / 1024 / 1024).toFixed(2)}MB). ` +
+            `Results will work during this session but won't persist across page reloads.`
+          );
+          localStorage.removeItem('qualilens_analysis_result');
+          return;
+        }
+        
+        try {
+          localStorage.setItem('qualilens_analysis_result', serializedResult);
+        } catch (saveError: any) {
+          // Handle quota exceeded error
+          if (saveError.name === 'QuotaExceededError' || saveError.code === 22) {
+            console.warn('localStorage quota exceeded, clearing old data');
+            try {
+              // Clear old PDF content first (it's usually the largest)
+              localStorage.removeItem('qualilens_pdf_content');
+              localStorage.setItem('qualilens_analysis_result', serializedResult);
+            } catch (retryError) {
+              console.error('Failed to save analysis result after clearing:', retryError);
+              // Remove the result if we still can't save it
+              localStorage.removeItem('qualilens_analysis_result');
+            }
+          } else {
+            throw saveError; // Re-throw if it's a different error
+          }
+        }
       } else {
         localStorage.removeItem('qualilens_analysis_result');
       }
     } catch (error: any) {
       console.error('Error saving analysis result:', error);
-      // Handle quota exceeded error
+      // Final fallback
       if (error.name === 'QuotaExceededError' || error.code === 22) {
-        console.warn('localStorage quota exceeded, clearing old data');
+        console.warn('localStorage quota exceeded. Analysis results will not persist.');
         try {
-          // Clear old PDF content first (it's usually the largest)
-          localStorage.removeItem('qualilens_pdf_content');
-          if (analysisResult) {
-            localStorage.setItem('qualilens_analysis_result', JSON.stringify(analysisResult));
-          }
-        } catch (retryError) {
-          console.error('Failed to save analysis result after clearing:', retryError);
+          localStorage.removeItem('qualilens_analysis_result');
+        } catch (cleanupError) {
+          // Ignore cleanup errors
         }
       }
     }
@@ -207,15 +235,50 @@ export default function Home() {
   useEffect(() => {
     try {
       if (pdfContent) {
-        // If it's a blob URL, we need to convert it to base64 before saving
+        // If it's a blob URL, we can't persist it (blob URLs are temporary)
         if (pdfContent.startsWith('blob:')) {
           // Don't save blob URLs as they won't work after reload
           // Instead, we'll keep the blob URL in memory but not persist it
           // The user will need to re-upload if they reload
           return;
         } else {
-          // It's already base64, save it
-          localStorage.setItem('qualilens_pdf_content', pdfContent);
+          // It's base64 encoded content
+          // Check size BEFORE attempting to save to avoid QuotaExceededError
+          // Base64 encoding increases size by ~33%, so we check the base64 string length
+          // localStorage typically has 5-10MB limit, so we'll use 3MB as a safe limit
+          const base64Size = pdfContent.length;
+          const maxSize = 3 * 1024 * 1024; // 3MB limit for base64 content
+          
+          if (base64Size > maxSize) {
+            console.warn(
+              `PDF content too large to persist (${(base64Size / 1024 / 1024).toFixed(2)}MB). ` +
+              `PDF will work during this session but won't persist across page reloads.`
+            );
+            // Remove any existing saved content to free up space
+            localStorage.removeItem('qualilens_pdf_content');
+            localStorage.removeItem('qualilens_file_name');
+            localStorage.removeItem('qualilens_file_size');
+            return;
+          }
+          
+          // Size is acceptable, try to save
+          try {
+            localStorage.setItem('qualilens_pdf_content', pdfContent);
+          } catch (saveError: any) {
+            // Handle quota exceeded error if it still occurs
+            if (saveError.name === 'QuotaExceededError' || saveError.code === 22) {
+              console.warn(
+                'localStorage quota exceeded. PDF content will not persist across page reloads. ' +
+                'Consider using a smaller PDF or clearing browser storage.'
+              );
+              // Clean up to free space
+              localStorage.removeItem('qualilens_pdf_content');
+              localStorage.removeItem('qualilens_file_name');
+              localStorage.removeItem('qualilens_file_size');
+            } else {
+              throw saveError; // Re-throw if it's a different error
+            }
+          }
         }
       } else {
         localStorage.removeItem('qualilens_pdf_content');
@@ -224,21 +287,15 @@ export default function Home() {
       }
     } catch (error: any) {
       console.error('Error saving PDF content:', error);
-      // Handle quota exceeded error - PDF content can be large
+      // Final fallback: ensure we don't leave broken state
       if (error.name === 'QuotaExceededError' || error.code === 22) {
-        console.warn('localStorage quota exceeded, PDF content too large to persist');
-        // Try to clear old PDF content and save again
+        console.warn('localStorage quota exceeded. PDF will not persist.');
         try {
           localStorage.removeItem('qualilens_pdf_content');
-          if (pdfContent && !pdfContent.startsWith('blob:')) {
-            // Only try to save if it's not too large (rough estimate: base64 is ~33% larger)
-            const estimatedSize = pdfContent.length * 0.75; // Rough estimate of original size
-            if (estimatedSize < 5 * 1024 * 1024) { // Only save if less than 5MB
-              localStorage.setItem('qualilens_pdf_content', pdfContent);
-            }
-          }
-        } catch (retryError) {
-          console.error('Failed to save PDF content after clearing:', retryError);
+          localStorage.removeItem('qualilens_file_name');
+          localStorage.removeItem('qualilens_file_size');
+        } catch (cleanupError) {
+          // Ignore cleanup errors
         }
       }
     }
@@ -1006,6 +1063,11 @@ export default function Home() {
                               setSelectedHighlightEvidence(evidence);
                               setShowHighlightDetails(true);
                             }}
+                            onEvidenceSelect={(evidence) => {
+                              // For keyboard navigation - just select without opening modal
+                              setSelectedEvidenceId(evidence.id);
+                              setSelectedHighlightEvidence(evidence);
+                            }}
                             onExportFunctionsReady={setPdfExportFunctions}
                             initialScale={1.0}
                           />
@@ -1074,6 +1136,11 @@ export default function Home() {
                             setSelectedEvidenceId(evidence.id);
                             setSelectedHighlightEvidence(evidence);
                             setShowHighlightDetails(true);
+                          }}
+                          onEvidenceSelect={(evidence) => {
+                            // For keyboard navigation - just select without opening modal
+                            setSelectedEvidenceId(evidence.id);
+                            setSelectedHighlightEvidence(evidence);
                           }}
                           onExportFunctionsReady={setPdfExportFunctions}
                           initialScale={1.5}
