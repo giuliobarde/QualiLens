@@ -287,25 +287,65 @@ class ReproducibilityAssessorTool(BaseTool):
 
                     logger.info(f"✅ Added NEGATIVE evidence {evidence_id}: {section_name} ({severity} severity, impact: {score_impact:.1f}, text_length: {len(text_to_add)} chars)")
             
+            # Extract reproducibility indicators FIRST (U-FR6 requirement)
+            reproducibility_indicators = self._extract_reproducibility_indicators(text_content)
+            
+            # Calculate evidence-based score from extracted indicators (PRIMARY SCORE)
+            evidence_score = self._calculate_evidence_based_score(reproducibility_indicators)
+            
             # Calculate base score with methodology adjustment
             raw_score = assessment_result.get("reproducibility_score", 0.0)
             
             # Calculate methodology-based baseline and adjustment
             methodology_baseline, methodology_adjustment = self._calculate_methodology_based_score(methodology_data)
             
-            # Start with methodology baseline (higher default, typically 0.40-0.60)
-            if raw_score < 0.10:
-                # Use methodology baseline if score is too low
-                adjusted_score = methodology_baseline
-                logger.info(f"📊 Raw score {raw_score:.2f} too low, using methodology baseline: {methodology_baseline:.2f}")
-            else:
-                # Apply methodology adjustment to raw score
-                adjusted_score = max(0.20, min(1.0, raw_score + methodology_adjustment))
-                logger.info(f"📊 Raw score: {raw_score:.2f}, methodology adjustment: {methodology_adjustment:+.2f}, final: {adjusted_score:.2f}")
+            # SCORING STRATEGY: Evidence-based score is PRIMARY (0-0.70), supplemented by LLM assessment
+            # If strong evidence found, use evidence as base and supplement with LLM
+            # If weak/no evidence, rely more on LLM assessment and methodology baseline
             
-            final_score = adjusted_score
+            if evidence_score >= 0.40:
+                # Strong evidence found - evidence is primary driver
+                # Evidence (0-0.70) + LLM supplement (0-0.20) + methodology adjustment
+                llm_supplement = min(0.20, raw_score * 0.20)  # LLM contributes up to 0.20
+                base_score = evidence_score + llm_supplement
+                final_score = max(0.30, min(1.0, base_score + methodology_adjustment * 0.2))
+                logger.info(f"📊 Strong evidence mode: evidence={evidence_score:.2f}, LLM supplement={llm_supplement:.2f}, final={final_score:.2f}")
+                
+            elif evidence_score >= 0.20:
+                # Moderate evidence - balanced approach
+                # Evidence (0-0.70) + LLM (0-0.25) + methodology adjustment
+                llm_component = min(0.25, raw_score * 0.25)
+                base_score = evidence_score + llm_component
+                final_score = max(0.25, min(1.0, base_score + methodology_adjustment * 0.25))
+                logger.info(f"📊 Moderate evidence mode: evidence={evidence_score:.2f}, LLM={llm_component:.2f}, final={final_score:.2f}")
+                
+            else:
+                # Weak/no evidence - rely on LLM assessment and methodology
+                if raw_score < 0.10:
+                    # Use methodology baseline if LLM score is too low
+                    final_score = max(methodology_baseline, evidence_score)
+                    logger.info(f"📊 Low evidence, low LLM: using methodology baseline={methodology_baseline:.2f}, evidence={evidence_score:.2f}, final={final_score:.2f}")
+                else:
+                    # LLM assessment is primary, evidence supplements
+                    llm_base = max(0.20, min(1.0, raw_score + methodology_adjustment))
+                    # Weighted: 70% LLM, 30% evidence
+                    final_score = (llm_base * 0.7) + (evidence_score * 0.3)
+                    logger.info(f"📊 Low evidence mode: LLM base={llm_base:.2f}, evidence={evidence_score:.2f}, final={final_score:.2f}")
 
-            logger.info(f"📊 Final reproducibility score: {final_score:.2f} (raw: {raw_score:.2f}, methodology baseline: {methodology_baseline:.2f}, adjustment: {methodology_adjustment:+.2f})")
+            logger.info(f"📊 Final reproducibility score: {final_score:.2f} (evidence: {evidence_score:.2f}, LLM: {raw_score:.2f}, methodology baseline: {methodology_baseline:.2f}, adjustment: {methodology_adjustment:+.2f})")
+            
+            # Build reproducibility summary
+            reproducibility_summary = {
+                "has_open_data": len(reproducibility_indicators["data_repositories"]) > 0,
+                "has_code_repository": len(reproducibility_indicators["code_repositories"]) > 0,
+                "has_preregistration": len(reproducibility_indicators["preregistration_numbers"]) > 0,
+                "has_supplementary_materials": len(reproducibility_indicators["supplementary_material_links"]) > 0,
+                "data_repositories": reproducibility_indicators["data_repositories"],
+                "code_repositories": reproducibility_indicators["code_repositories"],
+                "preregistration_numbers": reproducibility_indicators["preregistration_numbers"],
+                "supplementary_material_links": reproducibility_indicators["supplementary_material_links"],
+                "confidence_score": reproducibility_indicators["confidence_score"]
+            }
 
             return {
                 "success": True,
@@ -320,6 +360,7 @@ class ReproducibilityAssessorTool(BaseTool):
                 "reproducibility_barriers": assessment_result.get("reproducibility_barriers", []),
                 "recommendations": assessment_result.get("recommendations", []),
                 "overall_assessment": assessment_result.get("overall_assessment", ""),
+                "reproducibility_summary": reproducibility_summary,  # U-FR6: Reproducibility Summary
                 "assessment_criteria": assessment_criteria or [],
                 "reproducibility_level": reproducibility_level,
                 "tool_used": "reproducibility_assessor_tool"
@@ -332,6 +373,212 @@ class ReproducibilityAssessorTool(BaseTool):
                 "error": str(e),
                 "tool_used": "reproducibility_assessor_tool"
             }
+    
+    def _extract_reproducibility_indicators(self, text_content: str) -> Dict[str, Any]:
+        """
+        Extract specific reproducibility indicators from text content.
+        
+        Returns a dictionary with:
+        - data_repositories: List of detected data repository links
+        - code_repositories: List of detected code repository links
+        - preregistration_numbers: List of preregistration identifiers
+        - supplementary_material_links: List of supplementary material links
+        - confidence_score: Confidence in the reproducibility assessment (0.0-1.0)
+        """
+        indicators = {
+            "data_repositories": [],
+            "code_repositories": [],
+            "preregistration_numbers": [],
+            "supplementary_material_links": [],
+            "confidence_score": 0.0
+        }
+        
+        if not text_content:
+            return indicators
+        
+        text_lower = text_content.lower()
+        
+        # URL patterns for data repositories
+        # DOI pattern: doi.org/10.XXXX/YYYY (must have at least one segment after 10.)
+        data_repo_patterns = [
+            r'https?://(?:www\.)?(?:osf\.io|figshare\.com|zenodo\.org|dryad\.org|dataverse\.harvard\.edu|datacite\.org|datadryad\.org)/[^\s\)\.,;:]+',
+            r'doi\.org/10\.\d+[^\s\)\.,;:]+',  # Must have 10. followed by digits and more content
+            r'https?://(?:dx\.)?doi\.org/10\.\d+[^\s\)\.,;:]+',  # Full DOI URLs
+            r'data\s+available\s+at\s+(?:https?://)?[^\s\)\.,;:]+',
+            r'data\s+deposited\s+at\s+(?:https?://)?[^\s\)\.,;:]+',
+            r'data\s+repository[:\s]+(?:https?://)?[^\s\)\.,;:]+',
+        ]
+        
+        # URL patterns for code repositories
+        code_repo_patterns = [
+            r'https?://(?:www\.)?(?:github\.com|gitlab\.com|bitbucket\.org|sourceforge\.net)/[^\s\)\.,;:]+',
+            r'code\s+available\s+at\s+(?:https?://)?[^\s\)\.,;:]+',
+            r'source\s+code\s+at\s+(?:https?://)?[^\s\)\.,;:]+',
+            r'repository[:\s]+(?:https?://)?(?:www\.)?(?:github\.com|gitlab\.com|bitbucket\.org)/[^\s\)\.,;:]+',
+        ]
+        
+        # Preregistration patterns
+        prereg_patterns = [
+            r'(?:pre-?registered|preregistered|pre\s+registered)\s+(?:at|on|with)?\s*(?:https?://)?(?:www\.)?(?:clinicaltrials\.gov|osf\.io|aspredicted\.org|egap\.org)/[^\s\)\.,;:]+',
+            r'clinicaltrials\.gov/(?:id|identifier|number)[\s:=]+([A-Z]{2,}\d+)',
+            r'NCT\d{8}',
+            r'OSF\s+(?:registration|preregistration)[\s:]+([a-z0-9]+)',
+            r'AsPredicted\s+#?(\d+)',
+            r'preregistration\s+(?:number|id)[:\s]+([A-Z0-9]+)',
+        ]
+        
+        # Supplementary material patterns
+        supp_patterns = [
+            r'supplementary\s+(?:material|data|information|file|table|figure)[\s:]+(?:https?://)?[^\s\)\.,;:]+',
+            r'supplement\s+(?:available|at|in)[\s:]+(?:https?://)?[^\s\)\.,;:]+',
+            r'additional\s+(?:file|data|material)[\s:]+(?:https?://)?[^\s\)\.,;:]+',
+        ]
+        
+        # Extract data repository links
+        for pattern in data_repo_patterns:
+            matches = re.finditer(pattern, text_content, re.IGNORECASE)
+            for match in matches:
+                url = match.group(0).strip('.,;:')
+                # Clean up common trailing punctuation
+                url = re.sub(r'[.,;:]+$', '', url)
+                
+                # Validate DOI: must be complete (doi.org/10.XXXX/YYYY format)
+                if 'doi.org' in url.lower():
+                    # Check if it's a complete DOI (has at least 10.XXXX/YYYY structure)
+                    doi_match = re.search(r'doi\.org/(10\.\d+/.+)', url, re.IGNORECASE)
+                    if not doi_match:
+                        # Skip incomplete DOIs like "doi.org/10"
+                        continue
+                    # Ensure it has a proper suffix after the slash
+                    doi_parts = doi_match.group(1).split('/')
+                    if len(doi_parts) < 2 or len(doi_parts[1].strip()) < 3:
+                        # Skip if suffix is too short (likely incomplete)
+                        continue
+                
+                # Additional validation: skip very short URLs that are likely false positives
+                if len(url) < 10:
+                    continue
+                    
+                if url not in indicators["data_repositories"]:
+                    indicators["data_repositories"].append(url)
+        
+        # Extract code repository links
+        for pattern in code_repo_patterns:
+            matches = re.finditer(pattern, text_content, re.IGNORECASE)
+            for match in matches:
+                url = match.group(0).strip('.,;:')
+                url = re.sub(r'[.,;:]+$', '', url)
+                if url not in indicators["code_repositories"]:
+                    indicators["code_repositories"].append(url)
+        
+        # Extract preregistration numbers
+        for pattern in prereg_patterns:
+            matches = re.finditer(pattern, text_content, re.IGNORECASE)
+            for match in matches:
+                # Extract the identifier (could be in group 1 or the full match)
+                identifier = match.group(1) if match.groups() else match.group(0)
+                identifier = identifier.strip('.,;:')
+                if identifier and identifier not in indicators["preregistration_numbers"]:
+                    indicators["preregistration_numbers"].append(identifier)
+        
+        # Extract supplementary material links
+        for pattern in supp_patterns:
+            matches = re.finditer(pattern, text_content, re.IGNORECASE)
+            for match in matches:
+                url = match.group(0).strip('.,;:')
+                url = re.sub(r'[.,;:]+$', '', url)
+                if url not in indicators["supplementary_material_links"]:
+                    indicators["supplementary_material_links"].append(url)
+        
+        # Calculate confidence score based on indicators found
+        confidence_factors = 0
+        if indicators["data_repositories"]:
+            confidence_factors += 0.3
+        if indicators["code_repositories"]:
+            confidence_factors += 0.3
+        if indicators["preregistration_numbers"]:
+            confidence_factors += 0.2
+        if indicators["supplementary_material_links"]:
+            confidence_factors += 0.2
+        
+        # Base confidence if any indicators found
+        if confidence_factors > 0:
+            indicators["confidence_score"] = min(1.0, 0.5 + confidence_factors)
+        else:
+            # Lower confidence if no explicit indicators found
+            indicators["confidence_score"] = 0.3
+        
+        logger.info(f"📊 Extracted reproducibility indicators:")
+        logger.info(f"   - Data repositories: {len(indicators['data_repositories'])}")
+        logger.info(f"   - Code repositories: {len(indicators['code_repositories'])}")
+        logger.info(f"   - Preregistration numbers: {len(indicators['preregistration_numbers'])}")
+        logger.info(f"   - Supplementary links: {len(indicators['supplementary_material_links'])}")
+        logger.info(f"   - Confidence score: {indicators['confidence_score']:.2f}")
+        
+        return indicators
+    
+    def _calculate_evidence_based_score(self, indicators: Dict[str, Any]) -> float:
+        """
+        Calculate reproducibility score based on extracted evidence indicators.
+        
+        Scoring weights:
+        - Data repositories: 0.25 (25 points) - Most important for reproducibility
+        - Code repositories: 0.20 (20 points) - Critical for computational reproducibility
+        - Preregistration: 0.15 (15 points) - Important for preventing p-hacking
+        - Supplementary materials: 0.10 (10 points) - Supports reproducibility
+        - Total possible: 0.70 (70 points) from evidence
+        
+        Returns:
+            Score from 0.0 to 0.70 based on evidence found
+        """
+        score = 0.0
+        
+        # Data repositories (25 points)
+        if indicators.get("data_repositories"):
+            num_repos = len(indicators["data_repositories"])
+            # Multiple repositories = better (up to 0.25)
+            if num_repos >= 2:
+                score += 0.25  # Multiple data sources
+            else:
+                score += 0.20  # Single data source
+        else:
+            score += 0.0
+        
+        # Code repositories (20 points)
+        if indicators.get("code_repositories"):
+            num_repos = len(indicators["code_repositories"])
+            # Multiple repositories = better (up to 0.20)
+            if num_repos >= 2:
+                score += 0.20  # Multiple code sources
+            else:
+                score += 0.18  # Single code source
+        else:
+            score += 0.0
+        
+        # Preregistration (15 points)
+        if indicators.get("preregistration_numbers"):
+            num_prereg = len(indicators["preregistration_numbers"])
+            if num_prereg >= 1:
+                score += 0.15  # Preregistration found
+        else:
+            score += 0.0
+        
+        # Supplementary materials (10 points)
+        if indicators.get("supplementary_material_links"):
+            num_supp = len(indicators["supplementary_material_links"])
+            if num_supp >= 2:
+                score += 0.10  # Multiple supplementary materials
+            else:
+                score += 0.08  # Single supplementary material
+        else:
+            score += 0.0
+        
+        # Cap at 0.70 (evidence-based maximum)
+        evidence_score = min(0.70, score)
+        
+        logger.info(f"📊 Evidence-based score: {evidence_score:.2f} (data: {len(indicators.get('data_repositories', []))}, code: {len(indicators.get('code_repositories', []))}, prereg: {len(indicators.get('preregistration_numbers', []))}, supp: {len(indicators.get('supplementary_material_links', []))})")
+        
+        return evidence_score
     
     def _find_text_snippet(self, text_content: str, search_text: str) -> Optional[str]:
         """Find a text snippet in content around search text."""

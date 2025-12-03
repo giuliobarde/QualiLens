@@ -785,6 +785,8 @@ class PaperAnalysisAgent(BaseAgent):
                 integrated_result["reproducibility_barriers"] = reproducibility_data.get("reproducibility_barriers", [])
                 integrated_result["data_availability"] = reproducibility_data.get("data_availability", "")
                 integrated_result["code_availability"] = reproducibility_data.get("code_availability", "")
+                # U-FR6: Include reproducibility summary with indicators
+                integrated_result["reproducibility_summary"] = reproducibility_data.get("reproducibility_summary", {})
             
             # Add research gap analysis if available
             if "research_gap_analysis" in analysis_results:

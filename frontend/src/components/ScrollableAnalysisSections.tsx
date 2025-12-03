@@ -3,6 +3,7 @@
 import React, { useState, useEffect } from 'react';
 import ErrorBoundary from './ErrorBoundary';
 import SafeRenderer from './SafeRenderer';
+import ReproducibilitySummary from './ReproducibilitySummary';
 
 interface ScrollableAnalysisSectionsProps {
   data: any;
@@ -1144,7 +1145,21 @@ export default function ScrollableAnalysisSections({ data, className = '', onExp
 
   const renderReproducibility = () => (
     <ErrorBoundary>
-      <div className="space-y-4">
+      <div className="space-y-6">
+        {/* U-FR6: Reproducibility Summary */}
+        {data?.reproducibility_summary && (
+          <div className="bg-gradient-to-br from-indigo-50 to-blue-50 p-5 rounded-xl border border-indigo-200 shadow-sm">
+            <h3 className="text-lg font-bold text-indigo-900 mb-4 flex items-center gap-2">
+              <svg className="w-5 h-5 text-indigo-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
+              </svg>
+              Reproducibility Summary
+            </h3>
+            <ReproducibilitySummary data={data.reproducibility_summary} />
+          </div>
+        )}
+
+        {/* Reproducibility Score */}
         {data?.reproducibility_score !== undefined && (
           <div className="bg-indigo-50 p-4 rounded-lg">
             <h4 className="font-semibold text-indigo-800 mb-2">Reproducibility Score</h4>
@@ -1168,6 +1183,7 @@ export default function ScrollableAnalysisSections({ data, className = '', onExp
           </div>
         )}
         
+        {/* Data Availability */}
         {data?.data_availability && (
           <div>
             <h4 className="font-semibold text-gray-800 mb-2">Data Availability</h4>
@@ -1175,6 +1191,7 @@ export default function ScrollableAnalysisSections({ data, className = '', onExp
           </div>
         )}
         
+        {/* Code Availability */}
         {data?.code_availability && (
           <div>
             <h4 className="font-semibold text-gray-800 mb-2">Code Availability</h4>
@@ -1182,6 +1199,7 @@ export default function ScrollableAnalysisSections({ data, className = '', onExp
           </div>
         )}
         
+        {/* Reproducibility Barriers */}
         {data?.reproducibility_barriers && Array.isArray(data.reproducibility_barriers) && data.reproducibility_barriers.length > 0 && (
           <div>
             <h4 className="font-semibold text-red-800 mb-2">Barriers ({data.reproducibility_barriers.length})</h4>
