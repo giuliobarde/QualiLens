@@ -11,7 +11,7 @@ from typing import List, Optional, Dict, Any
 import os
 import asyncio
 from langchain_openai import ChatOpenAI, OpenAIEmbeddings
-from langchain.schema import HumanMessage
+from langchain_core.messages import HumanMessage
 
 logger = logging.getLogger(__name__)
 
